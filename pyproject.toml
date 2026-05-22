@@ -1,0 +1,10 @@
+[project]
+name = "wifi-captive-portal"
+version = "0.1.0"
+description = "WiFi captive portal with SMS OTP verification and Telegram admin approval"
+requires-python = ">=3.12"
+dependencies = [
+    "flask>=3.1",
+    "python-dotenv>=1.2.2",
+    "requests>=2.32.5",
+]

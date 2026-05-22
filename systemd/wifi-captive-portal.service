@@ -1,0 +1,14 @@
+[Unit]
+Description=WiFi Captive Portal - guest access with SMS OTP and Telegram approval
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/src/wifi-captive-portal
+ExecStart=/root/.local/bin/uv run app.py
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

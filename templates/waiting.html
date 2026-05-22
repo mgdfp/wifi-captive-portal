@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Waiting for approval{% endblock %}
+{% block head %}
+<script>
+  async function poll() {
+    try {
+      const r = await fetch("/api/status");
+      const data = await r.json();
+      if (data.status === "approved") {
+        window.location.href = data.redirect || "/success";
+      } else if (data.status === "denied") {
+        window.location.href = "/denied";
+      } else if (data.status === "error") {
+        window.location.href = "/";
+      }
+    } catch(e) {}
+  }
+  setInterval(poll, 5000);
+</script>
+{% endblock %}
+{% block content %}
+  <div class="icon">⏳</div>
+  <h1>Almost there</h1>
+  <p>Your request has been sent to the network admin. This usually takes just a minute.</p>
+  <div class="spinner"></div>
+  <p class="muted">This page checks automatically — no need to refresh.</p>
+{% endblock %}

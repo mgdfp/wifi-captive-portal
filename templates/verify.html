@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Enter code{% endblock %}
+{% block content %}
+  <div class="icon">💬</div>
+  <h1>Check your phone</h1>
+  <p>We sent a 6-digit code to <strong>{{ phone }}</strong>. Enter it below.</p>
+
+  {% if error %}
+  <div class="error">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/verify">
+    <label for="code">Verification code</label>
+    <input type="text" id="code" name="code" placeholder="123456"
+           inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+           autocomplete="one-time-code" autofocus required>
+    <button type="submit">Verify</button>
+  </form>
+  <p class="muted">Code expires in 10 minutes.</p>
+{% endblock %}

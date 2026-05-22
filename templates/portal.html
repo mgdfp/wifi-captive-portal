@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}WiFi Access{% endblock %}
+{% block content %}
+  <div class="icon">📶</div>
+  <h1>Get WiFi access</h1>
+  <p>Enter your name and phone number. We'll send you a code to verify.</p>
+
+  {% if error %}
+  <div class="error">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/submit">
+    <label for="name">Name</label>
+    <input type="text" id="name" name="name" placeholder="Your name" autocomplete="name" required>
+
+    <label for="phone">Phone number</label>
+    <input type="tel" id="phone" name="phone" placeholder="+4712345678" autocomplete="tel" required>
+
+    <button type="submit">Send code</button>
+  </form>
+  <p class="muted">Your number is only used to verify your identity.</p>
+{% endblock %}
