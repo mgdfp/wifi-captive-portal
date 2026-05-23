@@ -65,7 +65,10 @@ app.secret_key = SECRET_KEY
 
 # In-memory OTP sessions: sid -> {phone, name, mac, target_url, otp, expires_at}
 _otp_sessions: dict[str, dict] = {}
+_sms_cooldown: dict[str, float] = {}  # phone -> last sent timestamp
 _otp_lock = threading.Lock()
+
+SMS_COOLDOWN = 60  # seconds between OTPs to the same number
 
 
 def _new_otp() -> str:
@@ -78,6 +81,9 @@ def _clean_expired() -> None:
         expired = [k for k, v in _otp_sessions.items() if v["expires_at"] < now]
         for k in expired:
             del _otp_sessions[k]
+        stale = [p for p, t in _sms_cooldown.items() if now - t > SMS_COOLDOWN]
+        for p in stale:
+            del _sms_cooldown[p]
 
 
 def _normalise_phone(raw: str) -> str:
@@ -135,11 +141,18 @@ def submit():
     mac = session.get("mac", "")
     target_url = session.get("target_url", "http://google.com")
 
+    _clean_expired()
+    with _otp_lock:
+        last_sent = _sms_cooldown.get(phone, 0)
+        wait = int(SMS_COOLDOWN - (time.time() - last_sent))
+        if wait > 0:
+            return render_template("verify.html", phone=phone, error=f"Vent {wait} sekunder før du ber om ny kode.")
+
     otp = _new_otp()
     sid = secrets.token_urlsafe(24)
 
-    _clean_expired()
     with _otp_lock:
+        _sms_cooldown[phone] = time.time()
         _otp_sessions[sid] = {
             "phone": phone,
             "name": name,
