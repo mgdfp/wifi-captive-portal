@@ -74,7 +74,7 @@ MAC_ATTEMPT_LIMIT = 5    # max OTPs per MAC per hour
 
 
 def _new_otp() -> str:
-    return f"{random.randint(0, 999999):06d}"
+    return f"{secrets.randbelow(1000000):06d}"
 
 
 def _clean_expired() -> None:
@@ -201,7 +201,12 @@ def verify():
         return render_template("portal.html", error="Koden er utløpt. Prøv igjen.")
 
     if code != sess["otp"]:
-        return render_template("verify.html", phone=sess["phone"], error="Feil kode. Prøv igjen.")
+        with _otp_lock:
+            sess["attempts"] = sess.get("attempts", 0) + 1
+            if sess["attempts"] >= 5:
+                _otp_sessions.pop(sid, None)
+                return render_template("portal.html", mac="", target_url="", error="For mange feil koder. Be om en ny kode.")
+        return render_template("verify.html", sid=sid, phone=sess["phone"], error=f"Feil kode. Prøv igjen. ({sess['attempts']}/5)")
 
     phone = sess["phone"]
     name = sess["name"]
