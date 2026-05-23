@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Tilkoblet{% endblock %}
 {% block head %}
+<meta http-equiv="refresh" content="8;url={{ next_url }}">
 <script>
-  // Give UniFi a moment to propagate authorization, then redirect
   setTimeout(function() {
     window.location.href = "{{ next_url }}";
-  }, 3000);
+  }, 8000);
 </script>
 {% endblock %}
 {% block content %}
