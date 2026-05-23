@@ -194,6 +194,7 @@ def _handle_callback(callback_id: str, data: str) -> None:
         elif action == "reset":
             for mac in macs:
                 unifi.unthrottle_client(mac)
+                # re-authorize in case admin had previously used "block" (which unauthorizes)
                 unifi.authorize_guest(mac)
             store.update_guests(lambda g: g[phone].update({
                 "seconds_today": 0, "throttled": False, "tx_bytes": {}

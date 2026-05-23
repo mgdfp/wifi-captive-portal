@@ -19,12 +19,12 @@ def init(poll_interval: int, active_threshold: int) -> None:
 
 
 def _run_reset(today: str) -> None:
-    log.info("Daily reset: unthrottling all users and re-authorizing known devices.")
+    log.info("Daily reset: unthrottling all users.")
     guests = store.load_guests()
     for phone, user in guests.items():
-        for mac in user.get("macs", []):
-            unifi.unthrottle_client(mac)
-            unifi.authorize_guest(mac)
+        if user.get("throttled"):
+            for mac in user.get("macs", []):
+                unifi.unthrottle_client(mac)
     store.reset_all_daily(today)
     log.info("Daily reset complete.")
 
@@ -94,10 +94,9 @@ def _run_monitor() -> None:
         log.info("%s active — %dm/%dm used.", user["name"], minutes_used, limit_minutes)
 
         if seconds_today >= limit_seconds:
-            log.info("Quota reached for %s — throttling and revoking guest auth.", user["name"])
+            log.info("Quota reached for %s — throttling to slow speed.", user["name"])
             for mac in macs:
                 unifi.throttle_client(mac)
-                unifi.unauthorize_guest(mac)
             store.set_throttled(phone, True)
 
 
