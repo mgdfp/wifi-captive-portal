@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import logging
 import os
-import random
 import secrets
 import threading
 import time
