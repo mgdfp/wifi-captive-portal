@@ -55,7 +55,6 @@ def add_user(phone: str, name: str, mac: str, limit_seconds: int | None) -> None
             "limit_seconds": limit_seconds,
             "seconds_today": 0,
             "throttled": False,
-            "notified_half": False,
             "last_reset_date": datetime.now().date().isoformat(),
             "registered_at": datetime.now().isoformat(),
             "tx_bytes": {},
@@ -91,7 +90,6 @@ def reset_all_daily(today: str) -> None:
         for user in guests.values():
             user["seconds_today"] = 0
             user["throttled"] = False
-            user["notified_half"] = False
             user["last_reset_date"] = today
             user["tx_bytes"] = {}
     update_guests(_apply)

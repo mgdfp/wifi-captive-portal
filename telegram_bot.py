@@ -196,7 +196,7 @@ def _handle_callback(callback_id: str, data: str) -> None:
                 unifi.unthrottle_client(mac)
                 unifi.authorize_guest(mac)
             store.update_guests(lambda g: g[phone].update({
-                "seconds_today": 0, "throttled": False, "notified_half": False, "tx_bytes": {}
+                "seconds_today": 0, "throttled": False, "tx_bytes": {}
             }) if phone in g else None)
             _answer_callback(callback_id, "Nullstilt.")
             send(f"🔄 {user['name']} er nullstilt og frigjort.")

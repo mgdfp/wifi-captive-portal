@@ -5,6 +5,7 @@ description = "WiFi captive portal with SMS OTP verification and Telegram admin 
 requires-python = ">=3.12"
 dependencies = [
     "flask>=3.1",
+    "gunicorn>=23.0",
     "python-dotenv>=1.2.2",
     "requests>=2.32.5",
 ]
