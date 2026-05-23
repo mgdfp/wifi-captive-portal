@@ -176,14 +176,13 @@ def submit():
     if not sms.send_otp(phone, otp):
         return render_template("portal.html", error="Kunne ikke sende SMS. Sjekk nummeret og prøv igjen.")
 
-    session["sid"] = sid
-    return render_template("verify.html", phone=phone, error=None)
+    return render_template("verify.html", sid=sid, phone=phone, error=None)
 
 
 @app.route("/verify", methods=["POST"])
 def verify():
     """Check OTP. Approve returning users immediately; queue new users for Telegram approval."""
-    sid = session.get("sid")
+    sid = request.form.get("sid", "")
     code = request.form.get("code", "").strip()
 
     with _otp_lock:

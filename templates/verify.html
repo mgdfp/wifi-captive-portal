@@ -10,6 +10,7 @@
   {% endif %}
 
   <form method="post" action="/verify">
+    <input type="hidden" name="sid" value="{{ sid }}">
     <label for="code">Bekreftelseskode</label>
     <input type="text" id="code" name="code" placeholder="123456"
            inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
