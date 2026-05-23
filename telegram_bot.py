@@ -186,7 +186,6 @@ def _handle_callback(callback_id: str, data: str) -> None:
         elif action == "block":
             for mac in macs:
                 unifi.throttle_client(mac)
-                unifi.unauthorize_guest(mac)
             store.set_throttled(phone, True)
             _answer_callback(callback_id, "Blokkert.")
             send(f"🚫 {user['name']} er blokkert. Bruk Nullstill for å åpne igjen.")
