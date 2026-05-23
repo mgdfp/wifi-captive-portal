@@ -82,8 +82,10 @@ def _clean_expired() -> None:
 # Routes
 # ---------------------------------------------------------------------------
 
+@app.route("/guest/s/<site>")
+@app.route("/guest/s/<site>/")
 @app.route("/")
-def index():
+def index(site=None):
     """Entry point — UniFi redirects guests here with ?id=<mac>&t=<url>"""
     mac = (request.args.get("id") or "").lower().strip()
     target_url = request.args.get("t") or request.args.get("url") or "http://google.com"
