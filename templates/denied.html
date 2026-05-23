@@ -1,8 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Tilgang avvist{% endblock %}
 {% block content %}
-  <div class="icon">🚫</div>
-  <h1>Tilgang avvist</h1>
-  <p>Nettverksadministratoren har ikke godkjent forespørselen din.</p>
-  <p>Hvis du tror dette er en feil, spør personen som drifter nettverket.</p>
+  <div class="avatar-area">
+    <span class="deco" style="top:10px;left:5px;color:#fc8181">✕</span>
+    <span class="deco" style="top:65px;left:8px;color:#fc8181;font-size:0.6rem">●</span>
+    <span class="deco" style="bottom:25px;left:12px;color:#feb2b2;font-size:0.7rem">○</span>
+    <span class="deco" style="top:10px;right:10px;color:#fc8181;font-size:0.6rem">●</span>
+    <span class="deco" style="top:50px;right:5px;color:#fc8181">✕</span>
+    <span class="deco" style="bottom:30px;right:8px;color:#feb2b2;font-size:0.7rem">○</span>
+    <img src="/static/cat-denied.jpg" alt="" class="avatar-img denied">
+    <div class="avatar-badge">🚫</div>
+  </div>
+  <h1 style="text-align:center">Tilgang avvist</h1>
+  <p style="text-align:center">Nettverksadministratoren har ikke godkjent forespørselen din.</p>
+  <p style="text-align:center">Hvis du tror dette er en feil, spør personen som drifter nettverket.</p>
 {% endblock %}

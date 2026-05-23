@@ -9,9 +9,17 @@
 </script>
 {% endblock %}
 {% block content %}
-  <div class="icon">✅</div>
-  <h1>Du er koblet til!</h1>
-  <p>Nyt internett. Den daglige tidsgrensen håndheves automatisk.</p>
-  <p>Når kvoten er brukt opp, blir hastigheten din redusert — og du kan prøve igjen i morgen.</p>
+  <div class="avatar-area">
+    <span class="deco" style="top:5px;left:5px;color:#68d391">✦</span>
+    <span class="deco" style="top:35px;left:10px;color:#9ae6b4;font-size:0.6rem">●</span>
+    <span class="deco" style="top:5px;right:20px;color:#68d391">✦</span>
+    <span class="deco" style="top:55px;right:5px;color:#68d391;font-size:1.5rem">📶</span>
+    <span class="deco" style="bottom:20px;left:8px;color:#9ae6b4;font-size:0.6rem">●</span>
+    <img src="/static/cat-success.jpg" alt="" class="avatar-img success">
+    <div class="avatar-badge">✅</div>
+  </div>
+  <h1 style="text-align:center">Du er koblet til!</h1>
+  <p style="text-align:center">Nyt internett. Den daglige tidsgrensen håndheves automatisk.</p>
+  <p style="text-align:center">Når kvoten er brukt opp, blir hastigheten din redusert — og du kan prøve igjen i morgen.</p>
   <p class="muted">Du blir videresendt om noen sekunder…</p>
 {% endblock %}
