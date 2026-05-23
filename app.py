@@ -65,10 +65,12 @@ app.secret_key = SECRET_KEY
 
 # In-memory OTP sessions: sid -> {phone, name, mac, target_url, otp, expires_at}
 _otp_sessions: dict[str, dict] = {}
-_sms_cooldown: dict[str, float] = {}  # phone -> last sent timestamp
+_sms_cooldown: dict[str, float] = {}      # phone -> last sent timestamp
+_mac_attempts: dict[str, list] = {}       # mac -> [timestamps of OTP sends]
 _otp_lock = threading.Lock()
 
-SMS_COOLDOWN = 60  # seconds between OTPs to the same number
+SMS_COOLDOWN = 60        # seconds between OTPs to the same number
+MAC_ATTEMPT_LIMIT = 5    # max OTPs per MAC per hour
 
 
 def _new_otp() -> str:
@@ -84,6 +86,10 @@ def _clean_expired() -> None:
         stale = [p for p, t in _sms_cooldown.items() if now - t > SMS_COOLDOWN]
         for p in stale:
             del _sms_cooldown[p]
+        for mac in list(_mac_attempts):
+            _mac_attempts[mac] = [t for t in _mac_attempts[mac] if now - t < 3600]
+            if not _mac_attempts[mac]:
+                del _mac_attempts[mac]
 
 
 def _normalise_phone(raw: str) -> str:
@@ -147,12 +153,17 @@ def submit():
         wait = int(SMS_COOLDOWN - (time.time() - last_sent))
         if wait > 0:
             return render_template("verify.html", phone=phone, error=f"Vent {wait} sekunder før du ber om ny kode.")
+        attempts = _mac_attempts.get(mac, [])
+        if len(attempts) >= MAC_ATTEMPT_LIMIT:
+            log.warning("MAC %s hit OTP attempt limit — blocking further sends.", mac)
+            return render_template("portal.html", error="For mange forsøk. Kontakt administrator for å få tilgang.")
 
     otp = _new_otp()
     sid = secrets.token_urlsafe(24)
 
     with _otp_lock:
         _sms_cooldown[phone] = time.time()
+        _mac_attempts.setdefault(mac, []).append(time.time())
         _otp_sessions[sid] = {
             "phone": phone,
             "name": name,
