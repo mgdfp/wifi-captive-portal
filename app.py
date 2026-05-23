@@ -93,11 +93,15 @@ def _clean_expired() -> None:
 
 
 def _normalise_phone(raw: str) -> str:
-    """Normalise to E.164. Bare digits get +47 prepended (Norwegian default)."""
-    p = raw.strip().replace(" ", "").replace("-", "")
-    if p.startswith("00"):
+    """Normalise to E.164. Bare 8 digits get +47 prepended (Norwegian default)."""
+    p = raw.strip().replace(" ", "").replace("-", "").replace(".", "")
+    if p.startswith("0047"):
+        p = "+47" + p[4:]
+    elif p.startswith("00"):
         p = "+" + p[2:]
-    if not p.startswith("+"):
+    elif p.startswith("47") and len(p) == 10:
+        p = "+" + p
+    elif not p.startswith("+"):
         p = "+47" + p
     return p
 
@@ -144,8 +148,8 @@ def submit():
         return render_template("portal.html", mac=mac, target_url=target_url, error="Fyll inn både navn og telefonnummer.")
 
     phone = _normalise_phone(raw_phone)
-    if not phone[1:].isdigit() or len(phone) < 8:
-        return render_template("portal.html", mac=mac, target_url=target_url, error="Ugyldig telefonnummer. Prøv igjen.")
+    if not (phone.startswith("+47") and len(phone) == 11 and phone[1:].isdigit()):
+        return render_template("portal.html", mac=mac, target_url=target_url, error="Ugyldig telefonnummer. Skriv inn 8 siffer.")
 
     _clean_expired()
     with _otp_lock:
