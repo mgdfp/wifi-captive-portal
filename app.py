@@ -31,7 +31,8 @@ import unifi
 
 UDM_IP              = os.environ["UDM_IP"]
 UNIFI_API_KEY       = os.environ["UNIFI_API_KEY"]
-THROTTLE_PROFILE_ID = os.environ["THROTTLE_PROFILE_ID"]
+THROTTLE_DOWN_KBPS  = int(os.getenv("THROTTLE_DOWN_KBPS", "500"))
+THROTTLE_UP_KBPS    = int(os.getenv("THROTTLE_UP_KBPS", "250"))
 TWILIO_SID          = os.environ["TWILIO_ACCOUNT_SID"]
 TWILIO_TOKEN        = os.environ["TWILIO_AUTH_TOKEN"]
 TWILIO_FROM         = os.environ["TWILIO_FROM_NUMBER"]
@@ -47,7 +48,7 @@ OTP_TTL_SECONDS     = 600  # 10 minutes
 # Module init
 # ---------------------------------------------------------------------------
 
-unifi.init(UDM_IP, UNIFI_API_KEY, THROTTLE_PROFILE_ID)
+unifi.init(UDM_IP, UNIFI_API_KEY, THROTTLE_DOWN_KBPS, THROTTLE_UP_KBPS)
 sms.init(TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM)
 telegram_bot.init(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
 monitor.init(POLL_INTERVAL, ACTIVE_THRESHOLD)
