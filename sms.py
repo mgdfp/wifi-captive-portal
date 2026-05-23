@@ -29,8 +29,13 @@ def send_otp(to_number: str, code: str) -> bool:
             timeout=10,
         )
         resp.raise_for_status()
-        log.info("OTP sent to %s.", to_number)
+        data = resp.json()
+        log.info("OTP sent to %s — SID: %s status: %s", to_number, data.get("sid"), data.get("status"))
         return True
     except requests.RequestException as e:
         log.error("Failed to send OTP to %s: %s", to_number, e)
+        try:
+            log.error("Twilio response: %s", e.response.json())
+        except Exception:
+            pass
         return False
