@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Waiting for approval{% endblock %}
+{% block title %}Venter på godkjenning{% endblock %}
 {% block head %}
 <script>
   async function poll() {
@@ -20,8 +20,8 @@
 {% endblock %}
 {% block content %}
   <div class="icon">⏳</div>
-  <h1>Almost there</h1>
-  <p>Your request has been sent to the network admin. This usually takes just a minute.</p>
+  <h1>Nesten der!</h1>
+  <p>Forespørselen din er sendt til nettverksadministratoren. Dette tar vanligvis bare et minutt.</p>
   <div class="spinner"></div>
-  <p class="muted">This page checks automatically — no need to refresh.</p>
+  <p class="muted">Siden sjekker automatisk — du trenger ikke å oppdatere.</p>
 {% endblock %}

@@ -18,9 +18,6 @@ _lock = threading.Lock()
 _pending: dict[str, dict] = {}
 _pending_lock = threading.Lock()
 
-# Conversation state for /modify
-_conversation: dict = {"step": None}
-
 
 def init(bot_token: str, chat_id: str) -> None:
     global _token, _chat_id
@@ -58,6 +55,33 @@ def _answer_callback(callback_id: str, text: str = "") -> None:
     _post("answerCallbackQuery", json={"callback_query_id": callback_id, "text": text})
 
 
+def _fmt_limit(limit_seconds: int | None) -> str:
+    if not limit_seconds:
+        return "ubegrenset"
+    if limit_seconds < 3600:
+        return f"{limit_seconds // 60}min"
+    return f"{limit_seconds // 3600}t"
+
+
+def _quota_keyboard(callback_prefix: str) -> list:
+    """Inline keyboard for picking a quota. callback_prefix gets :<seconds> appended."""
+    return [
+        [
+            {"text": "5min",  "callback_data": f"{callback_prefix}:300"},
+            {"text": "15min", "callback_data": f"{callback_prefix}:900"},
+            {"text": "30min", "callback_data": f"{callback_prefix}:1800"},
+        ],
+        [
+            {"text": "1t",    "callback_data": f"{callback_prefix}:3600"},
+            {"text": "2t",    "callback_data": f"{callback_prefix}:7200"},
+            {"text": "4t",    "callback_data": f"{callback_prefix}:14400"},
+        ],
+        [
+            {"text": "Ubegrenset", "callback_data": f"{callback_prefix}:0"},
+        ],
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Pending approval queue
 # ---------------------------------------------------------------------------
@@ -79,21 +103,9 @@ def clear_pending(sid: str) -> None:
 
 
 def notify_new_guest(sid: str, name: str, phone: str) -> None:
-    keyboard = [
-        [
-            {"text": "1h",  "callback_data": f"approve:{sid}:3600"},
-            {"text": "2h",  "callback_data": f"approve:{sid}:7200"},
-            {"text": "4h",  "callback_data": f"approve:{sid}:14400"},
-        ],
-        [
-            {"text": "Unlimited", "callback_data": f"approve:{sid}:0"},
-            {"text": "Deny",      "callback_data": f"deny:{sid}"},
-        ],
-    ]
-    _send_buttons(
-        f"\U0001f514 New guest: {name} ({phone})\nHow much internet today?",
-        keyboard,
-    )
+    keyboard = _quota_keyboard(f"approve:{sid}")
+    keyboard.append([{"text": "🚫 Avvis", "callback_data": f"deny:{sid}"}])
+    _send_buttons(f"🔔 Ny gjest: {name} ({phone})\nDaglig kvote:", keyboard)
 
 
 # ---------------------------------------------------------------------------
@@ -105,12 +117,12 @@ def _handle_callback(callback_id: str, data: str) -> None:
 
     if parts[0] == "approve" and len(parts) == 3:
         sid, raw_limit = parts[1], parts[2]
-        limit_seconds = int(raw_limit) or None  # 0 means unlimited
+        limit_seconds = int(raw_limit) or None
 
         with _pending_lock:
             req = _pending.get(sid)
             if not req:
-                _answer_callback(callback_id, "Request expired.")
+                _answer_callback(callback_id, "Forespørselen er utløpt.")
                 return
             req["status"] = "approved"
             req["limit_seconds"] = limit_seconds
@@ -118,9 +130,9 @@ def _handle_callback(callback_id: str, data: str) -> None:
 
         store.add_user(phone, name, mac, limit_seconds)
         unifi.authorize_guest(mac)
-        limit_str = f"{limit_seconds // 3600}h" if limit_seconds else "unlimited"
-        _answer_callback(callback_id, f"Approved — {limit_str}")
-        send(f"✅ {name} approved ({limit_str}).")
+        limit_str = _fmt_limit(limit_seconds)
+        _answer_callback(callback_id, f"Godkjent — {limit_str}")
+        send(f"✅ {name} er godkjent ({limit_str}).")
         log.info("Approved %s (%s) with limit %s.", name, phone, limit_seconds)
 
     elif parts[0] == "deny" and len(parts) == 2:
@@ -128,32 +140,34 @@ def _handle_callback(callback_id: str, data: str) -> None:
         with _pending_lock:
             req = _pending.get(sid)
             if not req:
-                _answer_callback(callback_id, "Request expired.")
+                _answer_callback(callback_id, "Forespørselen er utløpt.")
                 return
             req["status"] = "denied"
             name = req["name"]
 
-        _answer_callback(callback_id, "Denied.")
-        send(f"❌ {name} denied.")
+        _answer_callback(callback_id, "Avvist.")
+        send(f"🚫 {name} ble avvist.")
         log.info("Denied guest %s.", name)
 
     elif parts[0] == "modify_pick" and len(parts) == 2:
         phone = parts[1]
         user = store.find_by_phone(phone)
         if not user:
-            _answer_callback(callback_id, "User not found.")
+            _answer_callback(callback_id, "Bruker ikke funnet.")
             return
         _answer_callback(callback_id)
-        limit_str = f"{user['limit_seconds'] // 3600}h" if user.get("limit_seconds") else "unlimited"
         used_min = user.get("seconds_today", 0) // 60
+        limit_str = _fmt_limit(user.get("limit_seconds"))
+        n = len(user.get("macs", []))
+        device_str = f"{n} enhet{'er' if n > 1 else ''}"
         keyboard = [
-            [{"text": "✏️ Change quota",    "callback_data": f"action:{phone}:quota"}],
-            [{"text": "\U0001f6ab Block now",         "callback_data": f"action:{phone}:block"}],
-            [{"text": "\U0001f504 Reset today",       "callback_data": f"action:{phone}:reset"}],
-            [{"text": "\U0001f5d1️ Delete user", "callback_data": f"action:{phone}:delete"}],
+            [{"text": "✏️ Endre kvote",    "callback_data": f"action:{phone}:quota"}],
+            [{"text": "🚫 Blokker",        "callback_data": f"action:{phone}:block"}],
+            [{"text": "🔄 Nullstill",      "callback_data": f"action:{phone}:reset"}],
+            [{"text": "🗑️ Slett",          "callback_data": f"action:{phone}:delete"}],
         ]
         _send_buttons(
-            f"{user['name']} ({phone})\nUsed today: {used_min}min — quota: {limit_str}\nWhat to do?",
+            f"{user['name']} ({phone})\nBrukt i dag: {used_min}min — kvote: {limit_str} — {device_str}\nHva vil du gjøre?",
             keyboard,
         )
 
@@ -161,24 +175,21 @@ def _handle_callback(callback_id: str, data: str) -> None:
         phone, action = parts[1], parts[2]
         user = store.find_by_phone(phone)
         if not user:
-            _answer_callback(callback_id, "User not found.")
+            _answer_callback(callback_id, "Bruker ikke funnet.")
             return
         macs = user.get("macs", [])
 
         if action == "quota":
             _answer_callback(callback_id)
-            with _lock:
-                _conversation["step"] = "awaiting_quota"
-                _conversation["phone"] = phone
-            send(f"New daily quota for {user['name']}?\nType e.g. 1h, 2h, 4h, or 'unlimited':")
+            _send_buttons(f"Ny daglig kvote for {user['name']}:", _quota_keyboard(f"set_quota:{phone}"))
 
         elif action == "block":
             for mac in macs:
                 unifi.throttle_client(mac)
                 unifi.unauthorize_guest(mac)
             store.set_throttled(phone, True)
-            _answer_callback(callback_id, "Blocked.")
-            send(f"\U0001f6ab {user['name']} blocked. Use Reset to restore.")
+            _answer_callback(callback_id, "Blokkert.")
+            send(f"🚫 {user['name']} er blokkert. Bruk Nullstill for å åpne igjen.")
 
         elif action == "reset":
             for mac in macs:
@@ -187,96 +198,69 @@ def _handle_callback(callback_id: str, data: str) -> None:
             store.update_guests(lambda g: g[phone].update({
                 "seconds_today": 0, "throttled": False, "notified_half": False, "tx_bytes": {}
             }) if phone in g else None)
-            _answer_callback(callback_id, "Reset.")
-            send(f"\U0001f504 {user['name']} reset and unblocked.")
+            _answer_callback(callback_id, "Nullstilt.")
+            send(f"🔄 {user['name']} er nullstilt og frigjort.")
 
         elif action == "delete":
             for mac in macs:
                 unifi.unauthorize_guest(mac)
             store.delete_user(phone)
-            _answer_callback(callback_id, "Deleted.")
-            send(f"\U0001f5d1️ {user['name']} deleted.")
+            _answer_callback(callback_id, "Slettet.")
+            send(f"🗑️ {user['name']} er slettet.")
+
+    elif parts[0] == "set_quota" and len(parts) == 3:
+        phone, raw_limit = parts[1], parts[2]
+        limit_seconds = int(raw_limit) or None
+        user = store.find_by_phone(phone)
+        if not user:
+            _answer_callback(callback_id, "Bruker ikke funnet.")
+            return
+        store.set_limit(phone, limit_seconds)
+        limit_str = _fmt_limit(limit_seconds)
+        _answer_callback(callback_id, f"Kvote satt til {limit_str}")
+        send(f"✅ {user['name']}s kvote er satt til {limit_str}.")
+        log.info("Quota for %s set to %s via Telegram.", user["name"], limit_seconds)
 
 
 # ---------------------------------------------------------------------------
 # Text command handler
 # ---------------------------------------------------------------------------
 
-def _parse_hours(text: str) -> int | None:
-    """Parse '1h', '2h', 'unlimited' -> seconds or None. Raises ValueError."""
-    t = text.strip().lower()
-    if t == "unlimited":
-        return None
-    if t.endswith("h"):
-        return int(t[:-1]) * 3600
-    raise ValueError(f"Cannot parse {text!r}")
-
-
 def _handle_command(text: str) -> None:
-    global _conversation
     text = text.strip()
     cmd = text.lower().split()[0] if text else ""
-
-    with _lock:
-        step = _conversation.get("step")
-
-    if cmd == "/cancel":
-        with _lock:
-            _conversation = {"step": None}
-        send("❌ Cancelled.")
-        return
-
-    # Active conversation takes priority over new commands
-    if step == "awaiting_quota":
-        with _lock:
-            phone = _conversation.get("phone")
-        try:
-            limit_seconds = _parse_hours(text)
-        except ValueError:
-            send("❌ Type e.g. 1h, 2h, 4h, or 'unlimited':")
-            return
-        store.set_limit(phone, limit_seconds)
-        user = store.find_by_phone(phone)
-        name = user["name"] if user else phone
-        limit_str = f"{limit_seconds // 3600}h" if limit_seconds else "unlimited"
-        send(f"✅ {name}'s quota set to {limit_str}.")
-        with _lock:
-            _conversation = {"step": None}
-        return
 
     if cmd == "/list":
         guests = store.load_guests()
         if not guests:
-            send("No users registered yet.")
+            send("Ingen brukere registrert ennå.")
             return
-        lines = ["\U0001f4cb Current users:\n"]
+        lines = ["📋 Brukere:\n"]
         for phone, user in guests.items():
-            limit_seconds = user.get("limit_seconds")
-            limit_str = f"{limit_seconds // 3600}h" if limit_seconds else "unlimited"
             used_min = user.get("seconds_today", 0) // 60
             throttled = user.get("throttled", False)
-            n_devices = len(user.get("macs", []))
-            status = "\U0001f6ab throttled" if throttled else f"{used_min}min used"
-            lines.append(f"• {user['name']} — {status} / {limit_str} — {n_devices} device(s)")
+            limit_str = _fmt_limit(user.get("limit_seconds"))
+            n = len(user.get("macs", []))
+            status = "🚫 blokkert" if throttled else f"{used_min}min brukt"
+            lines.append(f"• {user['name']} — {status} / {limit_str} — {n} enhet{'er' if n > 1 else ''}")
         send("\n".join(lines))
 
     elif cmd == "/modify":
         guests = store.load_guests()
         if not guests:
-            send("No users to modify.")
+            send("Ingen brukere å endre.")
             return
         keyboard = [
             [{"text": user["name"], "callback_data": f"modify_pick:{phone}"}]
             for phone, user in guests.items()
         ]
-        _send_buttons("Which user?", keyboard)
+        _send_buttons("Velg bruker:", keyboard)
 
     else:
         send(
-            "Commands:\n"
-            "/list — show all users\n"
-            "/modify — change quota / block / reset\n"
-            "/cancel — cancel active action"
+            "Tilgjengelige kommandoer:\n"
+            "/list — vis alle brukere\n"
+            "/modify — endre kvote / blokker / nullstill"
         )
 
 
@@ -329,9 +313,8 @@ def _run() -> None:
 
 def _register_commands() -> None:
     _post("setMyCommands", json={"commands": [
-        {"command": "list",   "description": "Show all users and usage"},
-        {"command": "modify", "description": "Change quota / block / reset a user"},
-        {"command": "cancel", "description": "Cancel active action"},
+        {"command": "list",   "description": "Vis alle brukere og forbruk"},
+        {"command": "modify", "description": "Endre kvote / blokker / nullstill"},
     ]})
 
 

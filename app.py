@@ -38,7 +38,7 @@ TWILIO_FROM         = os.environ["TWILIO_FROM_NUMBER"]
 TELEGRAM_TOKEN      = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID    = os.environ["TELEGRAM_CHAT_ID"]
 SECRET_KEY          = os.environ["SECRET_KEY"]
-PORT                = int(os.getenv("PORT", "8080"))
+PORT                = int(os.getenv("PORT", "80"))
 POLL_INTERVAL       = int(os.getenv("POLL_INTERVAL_SECONDS", "300"))
 ACTIVE_THRESHOLD    = int(os.getenv("ACTIVE_RATE_THRESHOLD_BYTES_PER_SEC", "6250"))
 OTP_TTL_SECONDS     = 600  # 10 minutes
@@ -78,6 +78,16 @@ def _clean_expired() -> None:
             del _otp_sessions[k]
 
 
+def _normalise_phone(raw: str) -> str:
+    """Normalise to E.164. Bare digits get +47 prepended (Norwegian default)."""
+    p = raw.strip().replace(" ", "").replace("-", "")
+    if p.startswith("00"):
+        p = "+" + p[2:]
+    if not p.startswith("+"):
+        p = "+47" + p
+    return p
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -91,7 +101,6 @@ def index(site=None):
     target_url = request.args.get("t") or request.args.get("url") or "http://google.com"
 
     if not mac:
-        # Direct browser hit without UniFi redirect — show generic portal
         return render_template("portal.html", error=None)
 
     result = store.find_by_mac(mac)
@@ -99,12 +108,10 @@ def index(site=None):
         phone, user = result
         if user.get("throttled"):
             return render_template("exhausted.html", name=user["name"])
-        # Known device, quota OK — silently re-authorize and send them through
         unifi.authorize_guest(mac)
         log.info("Known device %s (%s) re-authorized.", mac, user["name"])
-        return redirect(target_url)
+        return redirect(url_for("success", next=target_url))
 
-    # Unknown MAC — start registration
     session["mac"] = mac
     session["target_url"] = target_url
     return render_template("portal.html", error=None)
@@ -114,15 +121,14 @@ def index(site=None):
 def submit():
     """Receive name + phone, send OTP."""
     name = request.form.get("name", "").strip()
-    phone = request.form.get("phone", "").strip()
+    raw_phone = request.form.get("phone", "").strip()
 
-    if not name or not phone:
-        return render_template("portal.html", error="Please fill in both fields.")
+    if not name or not raw_phone:
+        return render_template("portal.html", error="Fyll inn både navn og telefonnummer.")
 
-    # Normalise phone: must start with + and contain only digits after
-    phone = phone.replace(" ", "").replace("-", "")
-    if not phone.startswith("+") or not phone[1:].isdigit() or len(phone) < 8:
-        return render_template("portal.html", error="Enter phone in international format, e.g. +4712345678")
+    phone = _normalise_phone(raw_phone)
+    if not phone[1:].isdigit() or len(phone) < 8:
+        return render_template("portal.html", error="Ugyldig telefonnummer. Prøv igjen.")
 
     mac = session.get("mac", "")
     target_url = session.get("target_url", "http://google.com")
@@ -142,7 +148,7 @@ def submit():
         }
 
     if not sms.send_otp(phone, otp):
-        return render_template("portal.html", error="Could not send SMS. Check your number and try again.")
+        return render_template("portal.html", error="Kunne ikke sende SMS. Sjekk nummeret og prøv igjen.")
 
     session["sid"] = sid
     return render_template("verify.html", phone=phone, error=None)
@@ -158,17 +164,16 @@ def verify():
         sess = _otp_sessions.get(sid)
 
     if not sess:
-        return render_template("verify.html", phone="", error="Session expired. Please start again.")
+        return render_template("verify.html", phone="", error="Sesjonen er utløpt. Start på nytt.")
 
     if time.time() > sess["expires_at"]:
         with _otp_lock:
             _otp_sessions.pop(sid, None)
-        return render_template("portal.html", error="Code expired. Please try again.")
+        return render_template("portal.html", error="Koden er utløpt. Prøv igjen.")
 
     if code != sess["otp"]:
-        return render_template("verify.html", phone=sess["phone"], error="Wrong code. Try again.")
+        return render_template("verify.html", phone=sess["phone"], error="Feil kode. Prøv igjen.")
 
-    # OTP correct — phone ownership confirmed
     phone = sess["phone"]
     name = sess["name"]
     mac = sess["mac"]
@@ -179,14 +184,12 @@ def verify():
 
     existing = store.find_by_phone(phone)
     if existing:
-        # Returning user — add MAC if new, authorize immediately
         store.add_mac_to_user(phone, mac)
         unifi.authorize_guest(mac)
-        log.info("Returning user %s (%s) connected from %s.", name, phone, mac)
+        log.info("Returning user %s (%s) connected from %s.", existing["name"], phone, mac)
         session.clear()
-        return redirect(target_url)
+        return redirect(url_for("success", next=target_url))
 
-    # New user — request admin approval via Telegram
     telegram_bot.register_pending(sid, name, phone, mac)
     telegram_bot.notify_new_guest(sid, name, phone)
     session["pending_sid"] = sid
@@ -219,7 +222,7 @@ def api_status():
         target_url = session.get("target_url", "http://google.com")
         telegram_bot.clear_pending(sid)
         session.clear()
-        return jsonify({"status": "approved", "redirect": target_url})
+        return jsonify({"status": "approved", "redirect": url_for("success", next=target_url)})
 
     if status == "denied":
         telegram_bot.clear_pending(sid)
@@ -231,7 +234,8 @@ def api_status():
 
 @app.route("/success")
 def success():
-    return render_template("success.html")
+    next_url = request.args.get("next", "http://google.com")
+    return render_template("success.html", next_url=next_url)
 
 
 @app.route("/denied")

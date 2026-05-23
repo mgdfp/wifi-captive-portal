@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Time's up{% endblock %}
+{% block title %}Kvoten er brukt opp{% endblock %}
 {% block content %}
   <div class="icon">📵</div>
-  <h1>That's enough for today{% if name %}, {{ name }}{% endif %}.</h1>
-  <p>You've used up your daily internet quota.</p>
-  <p>Your access resets at midnight. Go touch some grass — it's good for you. 🌿</p>
+  <h1>Det holder for i dag{% if name %}, {{ name }}{% endif %}.</h1>
+  <p>Du har brukt opp den daglige internettkvoten din.</p>
+  <p>Tilgangen nullstilles ved midnatt. Gå ut og ta en tur — det gjør godt. 🌿</p>
 {% endblock %}

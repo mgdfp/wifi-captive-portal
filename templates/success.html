@@ -1,8 +1,17 @@
 {% extends "base.html" %}
-{% block title %}Connected{% endblock %}
+{% block title %}Tilkoblet{% endblock %}
+{% block head %}
+<script>
+  // Give UniFi a moment to propagate authorization, then redirect
+  setTimeout(function() {
+    window.location.href = "{{ next_url }}";
+  }, 3000);
+</script>
+{% endblock %}
 {% block content %}
   <div class="icon">✅</div>
-  <h1>You're connected!</h1>
-  <p>Enjoy the internet. Your daily time limit will be enforced automatically.</p>
-  <p>When your time is up, your speed will be reduced and you'll need to come back tomorrow.</p>
+  <h1>Du er koblet til!</h1>
+  <p>Nyt internett. Den daglige tidsgrensen håndheves automatisk.</p>
+  <p>Når kvoten er brukt opp, blir hastigheten din redusert — og du kan prøve igjen i morgen.</p>
+  <p class="muted">Du blir videresendt om noen sekunder…</p>
 {% endblock %}

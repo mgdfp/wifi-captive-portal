@@ -1,22 +1,26 @@
 {% extends "base.html" %}
-{% block title %}WiFi Access{% endblock %}
+{% block title %}WiFi-tilgang{% endblock %}
 {% block content %}
   <div class="icon">📶</div>
-  <h1>Get WiFi access</h1>
-  <p>Enter your name and phone number. We'll send you a code to verify.</p>
+  <h1>Få tilgang til WiFi</h1>
+  <p>Skriv inn navn og telefonnummer. Vi sender deg en kode for å bekrefte identiteten din.</p>
 
   {% if error %}
   <div class="error">{{ error }}</div>
   {% endif %}
 
   <form method="post" action="/submit">
-    <label for="name">Name</label>
-    <input type="text" id="name" name="name" placeholder="Your name" autocomplete="name" required>
+    <label for="name">Navn</label>
+    <input type="text" id="name" name="name" placeholder="Fornavn Etternavn" autocomplete="name" required>
 
-    <label for="phone">Phone number</label>
-    <input type="tel" id="phone" name="phone" placeholder="+4712345678" autocomplete="tel" required>
+    <label for="phone">Telefonnummer</label>
+    <div class="phone-row">
+      <span class="phone-prefix">+47</span>
+      <input type="tel" id="phone" name="phone" placeholder="12345678"
+             inputmode="numeric" autocomplete="tel" required>
+    </div>
 
-    <button type="submit">Send code</button>
+    <button type="submit">Send kode</button>
   </form>
-  <p class="muted">Your number is only used to verify your identity.</p>
+  <p class="muted">Nummeret brukes kun for å bekrefte identiteten din.</p>
 {% endblock %}
