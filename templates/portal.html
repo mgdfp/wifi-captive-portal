@@ -1,9 +1,12 @@
 {% extends "base.html" %}
 {% block title %}WiFi-tilgang{% endblock %}
 {% block content %}
-  <div class="icon">📶</div>
-  <h1>Få tilgang til WiFi</h1>
-  <p>Skriv inn navn og telefonnummer. Vi sender deg en kode for å bekrefte identiteten din.</p>
+  <div class="card-hero">
+    <img src="/static/cat-portal.jpg" alt="">
+  </div>
+  <div class="hero-icon">📶</div>
+  <h1 style="text-align:center">Få tilgang til WiFi</h1>
+  <p style="text-align:center">Skriv inn navn og telefonnummer. Vi sender deg en kode for å bekrefte identiteten din.</p>
 
   {% if error %}
   <div class="error">{{ error }}</div>
