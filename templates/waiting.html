@@ -20,9 +20,18 @@
 </script>
 {% endblock %}
 {% block content %}
-  <div class="icon">⏳</div>
-  <h1>Nesten der!</h1>
-  <p>Forespørselen din er sendt til nettverksadministratoren. Dette tar vanligvis bare et minutt.</p>
+  <div class="avatar-area">
+    <span class="deco" style="top:20px;left:0px;color:#63b3ed">✺</span>
+    <span class="deco" style="top:55px;left:12px;color:#90cdf4;font-size:0.55rem">●</span>
+    <span class="deco" style="bottom:30px;left:15px;color:#63b3ed">✦</span>
+    <span class="deco" style="top:10px;right:15px;color:#90cdf4;font-size:0.55rem">●</span>
+    <span class="deco" style="top:60px;right:5px;color:#63b3ed">✦</span>
+    <span class="deco" style="bottom:25px;right:10px;color:#90cdf4;font-size:0.55rem">●</span>
+    <img src="/static/cat-waiting.jpg" alt="" class="avatar-img waiting">
+    <div class="avatar-badge">⏳</div>
+  </div>
+  <h1 style="text-align:center">Nesten der!</h1>
+  <p style="text-align:center">Forespørselen din er sendt til nettverksadministratoren. Dette tar vanligvis bare et minutt.</p>
   <div class="spinner"></div>
   <p class="muted">Siden sjekker automatisk — du trenger ikke å oppdatere.</p>
 {% endblock %}
