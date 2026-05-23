@@ -42,6 +42,7 @@ SECRET_KEY          = os.environ["SECRET_KEY"]
 PORT                = int(os.getenv("PORT", "80"))
 POLL_INTERVAL       = int(os.getenv("POLL_INTERVAL_SECONDS", "300"))
 ACTIVE_THRESHOLD    = int(os.getenv("ACTIVE_RATE_THRESHOLD_BYTES_PER_SEC", "6250"))
+FAILSAFE_KBPS       = int(os.getenv("FAILSAFE_KBPS", "2000"))
 OTP_TTL_SECONDS     = 600  # 10 minutes
 
 # ---------------------------------------------------------------------------
@@ -51,7 +52,7 @@ OTP_TTL_SECONDS     = 600  # 10 minutes
 unifi.init(UDM_IP, UNIFI_API_KEY, THROTTLE_DOWN_KBPS, THROTTLE_UP_KBPS)
 sms.init(TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM)
 telegram_bot.init(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
-monitor.init(POLL_INTERVAL, ACTIVE_THRESHOLD)
+monitor.init(POLL_INTERVAL, ACTIVE_THRESHOLD, FAILSAFE_KBPS)
 
 store.GUESTS_FILE.parent.mkdir(exist_ok=True)
 
