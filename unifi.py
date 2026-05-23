@@ -102,14 +102,29 @@ def _update_user_record(mac: str, updates: dict) -> bool:
 
 
 def _kick_and_wait(mac: str) -> None:
+    log.info("[%s] Waiting 5s for AP to sync new profile.", mac)
     time.sleep(5)
+    log.info("[%s] Sending kick-sta.", mac)
     _stamgr("kick-sta", mac)
+
     deadline = time.time() + 15
     while time.time() < deadline:
         time.sleep(1)
         active = fetch_active_clients()
         if active is None or mac not in active:
+            log.info("[%s] Device disconnected.", mac)
             break
+    else:
+        log.warning("[%s] Device still visible 15s after kick.", mac)
+
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        time.sleep(1)
+        active = fetch_active_clients()
+        if active is not None and mac in active:
+            log.info("[%s] Device reconnected with new profile active.", mac)
+            return
+    log.warning("[%s] Device did not reconnect within 30s — may need manual WiFi toggle.", mac)
 
 
 def throttle_client(mac: str) -> bool:
