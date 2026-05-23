@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Skriv inn kode{% endblock %}
 {% block content %}
-  <div class="icon">💬</div>
-  <h1>Sjekk telefonen din</h1>
+  <div class="card-hero">
+    <img src="/static/cat-verify.jpg" alt="">
+  </div>
+  <div class="hero-icon">💬</div>
+  <h1 style="text-align:center">Sjekk telefonen din</h1>
   <p>Vi sendte en 6-sifret kode til <strong>{{ phone }}</strong>. Skriv den inn nedenfor.</p>
 
   {% if error %}
