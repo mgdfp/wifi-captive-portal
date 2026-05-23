@@ -128,7 +128,7 @@ def index(site=None):
 
     session["mac"] = mac
     session["target_url"] = target_url
-    return render_template("portal.html", error=None)
+    return render_template("portal.html", mac=mac, target_url=target_url, error=None)
 
 
 @app.route("/submit", methods=["POST"])
@@ -137,15 +137,15 @@ def submit():
     name = request.form.get("name", "").strip()
     raw_phone = request.form.get("phone", "").strip()
 
+    mac = request.form.get("mac") or session.get("mac", "")
+    target_url = request.form.get("target_url") or session.get("target_url", "http://google.com")
+
     if not name or not raw_phone:
-        return render_template("portal.html", error="Fyll inn både navn og telefonnummer.")
+        return render_template("portal.html", mac=mac, target_url=target_url, error="Fyll inn både navn og telefonnummer.")
 
     phone = _normalise_phone(raw_phone)
     if not phone[1:].isdigit() or len(phone) < 8:
-        return render_template("portal.html", error="Ugyldig telefonnummer. Prøv igjen.")
-
-    mac = session.get("mac", "")
-    target_url = session.get("target_url", "http://google.com")
+        return render_template("portal.html", mac=mac, target_url=target_url, error="Ugyldig telefonnummer. Prøv igjen.")
 
     _clean_expired()
     with _otp_lock:
@@ -156,7 +156,7 @@ def submit():
         attempts = _mac_attempts.get(mac, [])
         if len(attempts) >= MAC_ATTEMPT_LIMIT:
             log.warning("MAC %s hit OTP attempt limit — blocking further sends.", mac)
-            return render_template("portal.html", error="For mange forsøk. Kontakt administrator for å få tilgang.")
+            return render_template("portal.html", mac=mac, target_url=target_url, error="For mange forsøk. Kontakt administrator for å få tilgang.")
 
     otp = _new_otp()
     sid = secrets.token_urlsafe(24)
@@ -217,23 +217,22 @@ def verify():
 
     telegram_bot.register_pending(sid, name, phone, mac)
     telegram_bot.notify_new_guest(sid, name, phone)
-    session["pending_sid"] = sid
-    session["target_url"] = target_url
-    return redirect(url_for("waiting"))
+    return redirect(url_for("waiting", sid=sid, next=target_url))
 
 
 @app.route("/waiting")
 def waiting():
-    sid = session.get("pending_sid")
+    sid = request.args.get("sid") or session.get("pending_sid")
     if not sid:
         return redirect(url_for("index"))
-    return render_template("waiting.html")
+    target_url = request.args.get("next", "http://google.com")
+    return render_template("waiting.html", sid=sid, target_url=target_url)
 
 
 @app.route("/api/status")
 def api_status():
     """Polled by the waiting page every 5 seconds."""
-    sid = session.get("pending_sid")
+    sid = request.args.get("sid") or session.get("pending_sid")
     if not sid:
         return jsonify({"status": "error"})
 
@@ -244,7 +243,7 @@ def api_status():
     status = result["status"]
 
     if status == "approved":
-        target_url = session.get("target_url", "http://google.com")
+        target_url = request.args.get("next", session.get("target_url", "http://google.com"))
         telegram_bot.clear_pending(sid)
         session.clear()
         return jsonify({"status": "approved", "redirect": url_for("success", next=target_url)})

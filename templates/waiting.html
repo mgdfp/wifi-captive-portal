@@ -2,9 +2,10 @@
 {% block title %}Venter på godkjenning{% endblock %}
 {% block head %}
 <script>
+  const pollUrl = "/api/status?sid={{ sid }}&next=" + encodeURIComponent("{{ target_url }}");
   async function poll() {
     try {
-      const r = await fetch("/api/status");
+      const r = await fetch(pollUrl);
       const data = await r.json();
       if (data.status === "approved") {
         window.location.href = data.redirect || "/success";

@@ -10,6 +10,8 @@
   {% endif %}
 
   <form method="post" action="/submit">
+    <input type="hidden" name="mac" value="{{ mac or '' }}">
+    <input type="hidden" name="target_url" value="{{ target_url or '' }}">
     <label for="name">Navn</label>
     <input type="text" id="name" name="name" placeholder="Fornavn Etternavn" autocomplete="name" required>
 
