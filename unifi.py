@@ -127,7 +127,7 @@ def unthrottle_client(mac: str) -> bool:
         if not rule:
             log.info("[%s] No throttle rule found — nothing to remove.", mac)
             return True
-        rule_id = rule["_id"]
+        rule_id = rule.get("id") or rule.get("_id")
     except requests.RequestException as e:
         log.error("Failed to list OON configs for %s: %s", mac, e)
         return False
