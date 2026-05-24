@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Tilgang ikke tilgjengelig{% endblock %}
+{% block content %}
+  <div class="avatar-area">
+    <span class="deco" style="top:10px;left:5px;color:#fc8181">✕</span>
+    <span class="deco" style="top:65px;left:8px;color:#fc8181;font-size:0.6rem">●</span>
+    <span class="deco" style="bottom:25px;left:12px;color:#feb2b2;font-size:0.7rem">○</span>
+    <span class="deco" style="top:10px;right:10px;color:#fc8181;font-size:0.6rem">●</span>
+    <span class="deco" style="top:50px;right:5px;color:#fc8181">✕</span>
+    <span class="deco" style="bottom:30px;right:8px;color:#feb2b2;font-size:0.7rem">○</span>
+    <img src="/static/cat-denied.jpg" alt="" class="avatar-img denied">
+    <div class="avatar-badge">⏳</div>
+  </div>
+  <h1 style="text-align:center">Ikke tilgjengelig akkurat nå</h1>
+  <p style="text-align:center">Vi kunne ikke behandle forespørselen din akkurat nå. Du vil få en SMS hvis tilgangen din blir godkjent — prøv gjerne å koble til igjen da.</p>
+  {% if admin_phone or admin_email %}
+  <p style="text-align:center">Har du spørsmål, ta kontakt med nettverksadministratoren:</p>
+  <p style="text-align:center">
+    {% if admin_phone %}<strong>{{ admin_phone }}</strong>{% endif %}
+    {% if admin_phone and admin_email %} &nbsp;·&nbsp; {% endif %}
+    {% if admin_email %}<a href="mailto:{{ admin_email }}">{{ admin_email }}</a>{% endif %}
+  </p>
+  {% endif %}
+{% endblock %}

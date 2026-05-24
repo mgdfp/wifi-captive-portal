@@ -3,20 +3,42 @@
 {% block head %}
 <script>
   const pollUrl = "/api/status?sid={{ sid }}&next=" + encodeURIComponent("{{ target_url }}");
+  const TIMEOUT = 300;
+  let remaining = TIMEOUT;
+
+  function updateCountdown() {
+    const min = Math.floor(remaining / 60);
+    const sec = remaining % 60;
+    const el = document.getElementById("countdown");
+    if (el) el.textContent = min + ":" + String(sec).padStart(2, "0");
+  }
+
+  function tick() {
+    remaining--;
+    if (remaining <= 0) {
+      window.location.href = "/info";
+      return;
+    }
+    updateCountdown();
+  }
+
   async function poll() {
     try {
       const r = await fetch(pollUrl);
       const data = await r.json();
       if (data.status === "approved") {
         window.location.href = data.redirect || "/success";
-      } else if (data.status === "denied") {
-        window.location.href = "/denied";
-      } else if (data.status === "error") {
-        window.location.href = "/";
+      } else if (data.status === "denied" || data.status === "error") {
+        window.location.href = "/info";
       }
     } catch(e) {}
   }
-  setInterval(poll, 5000);
+
+  document.addEventListener("DOMContentLoaded", function() {
+    updateCountdown();
+    setInterval(tick, 1000);
+    setInterval(poll, 5000);
+  });
 </script>
 {% endblock %}
 {% block content %}
@@ -34,4 +56,5 @@
   <p style="text-align:center">Forespørselen din er sendt til nettverksadministratoren. Dette tar vanligvis bare et minutt.</p>
   <div class="spinner"></div>
   <p class="muted">Siden sjekker automatisk — du trenger ikke å oppdatere.</p>
+  <p class="muted">Siden lukkes automatisk om <span id="countdown">5:00</span>.</p>
 {% endblock %}

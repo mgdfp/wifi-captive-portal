@@ -1,11 +1,15 @@
 import logging
+import os
 import threading
 import time
 
 import requests
 
+import sms
 import store
 import unifi
+
+_wifi_name = os.getenv("WIFI_NETWORK_NAME", "WiFi-nettverket")
 
 log = logging.getLogger(__name__)
 
@@ -128,7 +132,8 @@ def _handle_callback(callback_id: str, data: str) -> None:
             req["limit_seconds"] = limit_seconds
             name, phone, mac = req["name"], req["phone"], req["mac"]
 
-        store.add_user(phone, name, mac, limit_seconds)
+        store.approve_user(phone, limit_seconds)
+        store.add_mac_to_user(phone, mac)
         unifi.authorize_guest(mac)
         limit_str = _fmt_limit(limit_seconds)
         _answer_callback(callback_id, f"Godkjent — {limit_str}")
@@ -160,14 +165,22 @@ def _handle_callback(callback_id: str, data: str) -> None:
         limit_str = _fmt_limit(user.get("limit_seconds"))
         n = len(user.get("macs", []))
         device_str = f"{n} enhet{'er' if n > 1 else ''}"
-        keyboard = [
-            [{"text": "✏️ Endre kvote",    "callback_data": f"action:{phone}:quota"}],
-            [{"text": "🚫 Blokker",        "callback_data": f"action:{phone}:block"}],
-            [{"text": "🔄 Nullstill",      "callback_data": f"action:{phone}:reset"}],
-            [{"text": "🗑️ Slett",          "callback_data": f"action:{phone}:delete"}],
-        ]
+        if user.get("status") == "blocked":
+            keyboard = [
+                [{"text": "✅ Godkjenn",   "callback_data": f"action:{phone}:approve"}],
+                [{"text": "🗑️ Slett",     "callback_data": f"action:{phone}:delete"}],
+            ]
+            status_str = "⏳ blokkert (venter)"
+        else:
+            keyboard = [
+                [{"text": "✏️ Endre kvote",    "callback_data": f"action:{phone}:quota"}],
+                [{"text": "🚫 Blokker",        "callback_data": f"action:{phone}:block"}],
+                [{"text": "🔄 Nullstill",      "callback_data": f"action:{phone}:reset"}],
+                [{"text": "🗑️ Slett",          "callback_data": f"action:{phone}:delete"}],
+            ]
+            status_str = "🚫 blokkert" if user.get("throttled") else f"{used_min}min brukt"
         _send_buttons(
-            f"{user['name']} ({phone})\nBrukt i dag: {used_min}min — kvote: {limit_str} — {device_str}\nHva vil du gjøre?",
+            f"{user['name']} ({phone})\nStatus: {status_str} — kvote: {limit_str} — {device_str}\nHva vil du gjøre?",
             keyboard,
         )
 
@@ -179,7 +192,11 @@ def _handle_callback(callback_id: str, data: str) -> None:
             return
         macs = user.get("macs", [])
 
-        if action == "quota":
+        if action == "approve":
+            _answer_callback(callback_id)
+            _send_buttons(f"Daglig kvote for {user['name']}:", _quota_keyboard(f"approve_blocked:{phone}"))
+
+        elif action == "quota":
             _answer_callback(callback_id)
             _send_buttons(f"Ny daglig kvote for {user['name']}:", _quota_keyboard(f"set_quota:{phone}"))
 
@@ -208,6 +225,22 @@ def _handle_callback(callback_id: str, data: str) -> None:
             _answer_callback(callback_id, "Slettet.")
             send(f"🗑️ {user['name']} er slettet.")
 
+    elif parts[0] == "approve_blocked" and len(parts) == 3:
+        phone, raw_limit = parts[1], parts[2]
+        limit_seconds = int(raw_limit) or None
+        user = store.find_by_phone(phone)
+        if not user:
+            _answer_callback(callback_id, "Bruker ikke funnet.")
+            return
+        store.approve_user(phone, limit_seconds)
+        for mac in user.get("macs", []):
+            unifi.authorize_guest(mac)
+        sms.send_sms(phone, f"Du har fått tilgang til internett — koble til {_wifi_name} på nytt.")
+        limit_str = _fmt_limit(limit_seconds)
+        _answer_callback(callback_id, f"Godkjent — {limit_str}")
+        send(f"✅ {user['name']} er godkjent ({limit_str}) og varslet på SMS.")
+        log.info("Approved blocked user %s (%s) with limit %s.", user["name"], phone, limit_seconds)
+
     elif parts[0] == "set_quota" and len(parts) == 3:
         phone, raw_limit = parts[1], parts[2]
         limit_seconds = int(raw_limit) or None
@@ -235,14 +268,24 @@ def _handle_command(text: str) -> None:
         if not guests:
             send("Ingen brukere registrert ennå.")
             return
-        lines = ["📋 Brukere:\n"]
-        for phone, user in guests.items():
-            used_min = user.get("seconds_today", 0) // 60
-            throttled = user.get("throttled", False)
-            limit_str = _fmt_limit(user.get("limit_seconds"))
-            n = len(user.get("macs", []))
-            status = "🚫 blokkert" if throttled else f"{used_min}min brukt"
-            lines.append(f"• {user['name']} — {status} / {limit_str} — {n} enhet{'er' if n > 1 else ''}")
+        approved = [(p, u) for p, u in guests.items() if u.get("status") != "blocked"]
+        blocked = [(p, u) for p, u in guests.items() if u.get("status") == "blocked"]
+        lines = []
+        if approved:
+            lines.append("✅ Godkjente:\n")
+            for phone, user in approved:
+                used_min = user.get("seconds_today", 0) // 60
+                throttled = user.get("throttled", False)
+                limit_str = _fmt_limit(user.get("limit_seconds"))
+                n = len(user.get("macs", []))
+                status = "🚫 throttlet" if throttled else f"{used_min}min brukt"
+                lines.append(f"• {user['name']} — {status} / {limit_str} — {n} enhet{'er' if n > 1 else ''}")
+        if blocked:
+            if approved:
+                lines.append("")
+            lines.append("⏳ Venter på godkjenning:\n")
+            for phone, user in blocked:
+                lines.append(f"• {user['name']} ({phone})")
         send("\n".join(lines))
 
     elif cmd == "/modify":
@@ -250,10 +293,17 @@ def _handle_command(text: str) -> None:
         if not guests:
             send("Ingen brukere å endre.")
             return
-        keyboard = [
-            [{"text": user["name"], "callback_data": f"modify_pick:{phone}"}]
-            for phone, user in guests.items()
-        ]
+        approved = [(p, u) for p, u in guests.items() if u.get("status") != "blocked"]
+        blocked = [(p, u) for p, u in guests.items() if u.get("status") == "blocked"]
+        keyboard = []
+        if approved:
+            keyboard.append([{"text": "— Godkjente —", "callback_data": "noop"}])
+            for phone, user in approved:
+                keyboard.append([{"text": user["name"], "callback_data": f"modify_pick:{phone}"}])
+        if blocked:
+            keyboard.append([{"text": "— Venter —", "callback_data": "noop"}])
+            for phone, user in blocked:
+                keyboard.append([{"text": f"⏳ {user['name']}", "callback_data": f"modify_pick:{phone}"}])
         _send_buttons("Velg bruker:", keyboard)
 
     else:

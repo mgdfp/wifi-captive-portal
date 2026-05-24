@@ -24,6 +24,8 @@ def _run_reset(today: str) -> None:
     log.info("Daily reset: unthrottling all users.")
     guests = store.load_guests()
     for phone, user in guests.items():
+        if user.get("status") == "blocked":
+            continue
         if user.get("throttled"):
             for mac in user.get("macs", []):
                 unifi.unthrottle_client(mac)
@@ -87,6 +89,8 @@ def _run_monitor() -> None:
     log.info("--- Poll: %d device(s) on network ---", len(active))
 
     for phone, user in guests.items():
+        if user.get("status") == "blocked":
+            continue
         if user.get("throttled"):
             _check_throttle_failsafe(phone, user, active)
             continue

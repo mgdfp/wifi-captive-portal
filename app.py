@@ -42,6 +42,8 @@ PORT                = int(os.getenv("PORT", "80"))
 POLL_INTERVAL       = int(os.getenv("POLL_INTERVAL_SECONDS", "300"))
 ACTIVE_THRESHOLD    = int(os.getenv("ACTIVE_RATE_THRESHOLD_BYTES_PER_SEC", "6250"))
 FAILSAFE_KBPS       = int(os.getenv("FAILSAFE_KBPS", "2000"))
+ADMIN_EMAIL         = os.getenv("ADMIN_EMAIL", "")
+ADMIN_PHONE         = os.getenv("ADMIN_PHONE", "")
 OTP_TTL_SECONDS     = 600  # 10 minutes
 
 # ---------------------------------------------------------------------------
@@ -125,6 +127,8 @@ def index(site=None):
         phone, user = result
         if user.get("throttled"):
             return render_template("exhausted.html", name=user["name"])
+        if user.get("status") == "blocked":
+            return render_template("info.html", admin_email=ADMIN_EMAIL, admin_phone=ADMIN_PHONE)
         unifi.authorize_guest(mac)
         log.info("Known device %s (%s) re-authorized.", mac, user["name"])
         return redirect(url_for("success", next=target_url))
@@ -149,6 +153,10 @@ def submit():
     phone = _normalise_phone(raw_phone)
     if not (phone.startswith("+47") and len(phone) == 11 and phone[1:].isdigit()):
         return render_template("portal.html", mac=mac, target_url=target_url, error="Ugyldig telefonnummer. Skriv inn 8 siffer.")
+
+    existing = store.find_by_phone(phone)
+    if existing and existing.get("status") == "blocked":
+        return render_template("info.html", admin_email=ADMIN_EMAIL, admin_phone=ADMIN_PHONE)
 
     _clean_expired()
     with _otp_lock:
@@ -217,12 +225,15 @@ def verify():
 
     existing = store.find_by_phone(phone)
     if existing:
+        if existing.get("status") == "blocked":
+            return render_template("info.html", admin_email=ADMIN_EMAIL, admin_phone=ADMIN_PHONE)
         store.add_mac_to_user(phone, mac)
         unifi.authorize_guest(mac)
         log.info("Returning user %s (%s) connected from %s.", existing["name"], phone, mac)
         session.clear()
         return redirect(url_for("success", next=target_url))
 
+    store.add_blocked_user(phone, name, mac)
     telegram_bot.register_pending(sid, name, phone, mac)
     telegram_bot.notify_new_guest(sid, name, phone)
     return redirect(url_for("waiting", sid=sid, next=target_url))
@@ -270,9 +281,14 @@ def success():
     return render_template("success.html", next_url=next_url)
 
 
+@app.route("/info")
+def info():
+    return render_template("info.html", admin_email=ADMIN_EMAIL, admin_phone=ADMIN_PHONE)
+
+
 @app.route("/denied")
 def denied():
-    return render_template("denied.html")
+    return redirect(url_for("info"))
 
 
 # ---------------------------------------------------------------------------

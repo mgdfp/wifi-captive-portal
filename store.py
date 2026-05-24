@@ -47,6 +47,30 @@ def find_by_phone(phone: str) -> dict | None:
     return load_guests().get(phone)
 
 
+def add_blocked_user(phone: str, name: str, mac: str) -> None:
+    def _apply(guests):
+        guests[phone] = {
+            "name": name,
+            "status": "blocked",
+            "macs": [mac.lower()],
+            "limit_seconds": None,
+            "seconds_today": 0,
+            "throttled": False,
+            "last_reset_date": datetime.now().date().isoformat(),
+            "registered_at": datetime.now().isoformat(),
+            "tx_bytes": {},
+        }
+    update_guests(_apply)
+
+
+def approve_user(phone: str, limit_seconds: int | None) -> None:
+    def _apply(guests):
+        if phone in guests:
+            guests[phone]["status"] = "approved"
+            guests[phone]["limit_seconds"] = limit_seconds
+    update_guests(_apply)
+
+
 def add_user(phone: str, name: str, mac: str, limit_seconds: int | None) -> None:
     def _apply(guests):
         guests[phone] = {
