@@ -94,6 +94,13 @@ def add_mac_to_user(phone: str, mac: str) -> None:
     update_guests(_apply)
 
 
+def update_device_info(phone: str, mac: str, hostname: str, oui: str) -> None:
+    def _apply(guests):
+        if phone in guests:
+            guests[phone].setdefault("devices", {})[mac] = {"hostname": hostname, "oui": oui}
+    update_guests(_apply)
+
+
 def set_throttled(phone: str, throttled: bool) -> None:
     def _apply(guests):
         if phone in guests:

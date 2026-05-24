@@ -163,8 +163,14 @@ def _handle_callback(callback_id: str, data: str) -> None:
         _answer_callback(callback_id)
         used_min = user.get("seconds_today", 0) // 60
         limit_str = _fmt_limit(user.get("limit_seconds"))
-        n = len(user.get("macs", []))
-        device_str = f"{n} enhet{'er' if n > 1 else ''}"
+        devices = user.get("devices", {})
+        device_lines = []
+        for mac in user.get("macs", []):
+            info = devices.get(mac, {})
+            hostname = info.get("hostname", "")
+            oui = info.get("oui", "")
+            label = hostname or oui or "ukjent enhet"
+            device_lines.append(f"  • {label} ({mac})")
         if user.get("status") == "blocked":
             keyboard = [
                 [{"text": "✅ Godkjenn",   "callback_data": f"action:{phone}:approve"}],
@@ -179,8 +185,9 @@ def _handle_callback(callback_id: str, data: str) -> None:
                 [{"text": "🗑️ Slett",          "callback_data": f"action:{phone}:delete"}],
             ]
             status_str = "🚫 blokkert" if user.get("throttled") else f"{used_min}min brukt"
+        device_section = "\n".join(device_lines) if device_lines else "  (ingen enheter registrert)"
         _send_buttons(
-            f"{user['name']} ({phone})\nStatus: {status_str} — kvote: {limit_str} — {device_str}\nHva vil du gjøre?",
+            f"{user['name']} ({phone})\nStatus: {status_str} — kvote: {limit_str}\nEnheter:\n{device_section}\nHva vil du gjøre?",
             keyboard,
         )
 

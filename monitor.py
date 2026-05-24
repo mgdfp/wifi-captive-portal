@@ -109,6 +109,12 @@ def _run_monitor() -> None:
                 tx_bytes_map.pop(mac, None)
                 continue
 
+            if mac not in user.get("devices", {}):
+                hostname = client.get("hostname") or ""
+                oui = client.get("oui") or ""
+                if hostname or oui:
+                    store.update_device_info(phone, mac, hostname, oui)
+
             tx = client.get("tx_bytes") or 0
             prev = tx_bytes_map.get(mac)
             tx_bytes_map[mac] = tx
