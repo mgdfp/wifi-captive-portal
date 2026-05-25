@@ -67,6 +67,7 @@ def _check_throttle_failsafe(phone: str, user: dict, active: dict) -> None:
                 "%s (%s) still at %.0f kbps after throttle — kicking off WiFi.",
                 user["name"], mac, rate_kbps,
             )
+            gateway.unthrottle_client(mac)   # remove stale tc rules before kick
             gateway.unauthorize_guest(mac)
             telegram_bot.send(
                 f"⚠️ Failsafe: {user['name']} kastet av WiFi "

@@ -148,7 +148,9 @@ def index(_path=None):
     if result:
         phone, user = result
         if user.get("throttled"):
-            gateway.authorize_guest(mac)  # restore redirect exemption; notice shows once
+            gateway.authorize_guest(mac)
+            gateway.unthrottle_client(mac)  # clear stale tc rules for old IP
+            gateway.throttle_client(mac)    # re-apply for current IP
             return render_template("exhausted.html", name=user["name"], throttle_kbps=THROTTLE_DOWN_KBPS)
         if user.get("status") == "blocked":
             return render_template("info.html", admin_email=ADMIN_EMAIL, admin_phone=ADMIN_PHONE)
