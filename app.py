@@ -48,6 +48,7 @@ ADMIN_EMAIL         = os.getenv("ADMIN_EMAIL", "")
 ADMIN_PHONE         = os.getenv("ADMIN_PHONE", "")
 PORTAL_HOST         = os.getenv("PORTAL_HOST", "192.168.21.2")
 OTP_TTL_SECONDS     = 600  # 10 minutes
+_FALLBACK_URL       = "http://www.google.com"
 
 # ---------------------------------------------------------------------------
 # Module init
@@ -84,6 +85,13 @@ _otp_lock = threading.Lock()
 
 SMS_COOLDOWN = 60        # seconds between OTPs to the same number
 MAC_ATTEMPT_LIMIT = 5    # max OTPs per MAC per hour
+
+
+def _safe_url(url: str | None) -> str:
+    """Accept only http/https URLs; fall back to a known-safe destination."""
+    if url and (url.startswith("http://") or url.startswith("https://")):
+        return url
+    return _FALLBACK_URL
 
 
 def _new_otp() -> str:
@@ -158,8 +166,9 @@ def submit():
     name = request.form.get("name", "").strip()
     raw_phone = request.form.get("phone", "").strip()
 
-    mac = request.form.get("mac") or session.get("mac", "")
-    target_url = request.form.get("target_url") or session.get("target_url", "http://google.com")
+    # MAC and target URL must come from the server-set session, not client form fields.
+    mac = session.get("mac", "")
+    target_url = _safe_url(session.get("target_url"))
 
     if not name or not raw_phone:
         return render_template("portal.html", mac=mac, target_url=target_url, error="Fyll inn både navn og telefonnummer.")
@@ -259,7 +268,7 @@ def waiting():
     sid = request.args.get("sid") or session.get("pending_sid")
     if not sid:
         return redirect(url_for("index"))
-    target_url = request.args.get("next", "http://google.com")
+    target_url = _safe_url(request.args.get("next"))
     return render_template("waiting.html", sid=sid, target_url=target_url, portal_host=PORTAL_HOST)
 
 
@@ -281,7 +290,7 @@ def api_status():
     status = result["status"]
 
     if status == "approved":
-        target_url = request.args.get("next", session.get("target_url", "http://google.com"))
+        target_url = _safe_url(request.args.get("next") or session.get("target_url"))
         telegram_bot.clear_pending(sid)
         session.clear()
         r = jsonify({"status": "approved", "redirect": f"http://{PORTAL_HOST}/success?next={target_url}"})
@@ -302,7 +311,7 @@ def api_status():
 
 @app.route("/success")
 def success():
-    next_url = request.args.get("next", "http://google.com")
+    next_url = _safe_url(request.args.get("next"))
     return render_template("success.html", next_url=next_url)
 
 
