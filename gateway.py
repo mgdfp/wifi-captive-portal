@@ -325,6 +325,12 @@ def throttle_client(mac: str) -> bool:
               "burst", f"{burst_kb}k", "drop", "flowid", ":1"])
         log.info("[%s] Throttled to %d/%d kbps (IP %s).",
                  mac, _THROTTLE_DOWN_KBPS, _THROTTLE_UP_KBPS, ip)
+        # Drop the redirect exemption so the next plain-HTTP request hits the
+        # portal and shows the exhausted page. The portal restores it immediately
+        # after rendering, so the notice appears only once.
+        redir_args = ["CAPTIVE_REDIRECT", "-m", "mac", "--mac-source", mac, "-j", "RETURN"]
+        if _ipt_exists(*redir_args, table="nat"):
+            _run(["iptables", "-t", "nat", "-D"] + redir_args, check=False)
         return True
     except subprocess.CalledProcessError as e:
         log.error("throttle_client %s: %s", mac, e)

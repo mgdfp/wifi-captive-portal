@@ -148,7 +148,8 @@ def index(_path=None):
     if result:
         phone, user = result
         if user.get("throttled"):
-            return render_template("exhausted.html", name=user["name"])
+            gateway.authorize_guest(mac)  # restore redirect exemption; notice shows once
+            return render_template("exhausted.html", name=user["name"], throttle_kbps=THROTTLE_DOWN_KBPS)
         if user.get("status") == "blocked":
             return render_template("info.html", admin_email=ADMIN_EMAIL, admin_phone=ADMIN_PHONE)
         gateway.authorize_guest(mac)

@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Kvoten er brukt opp{% endblock %}
 {% block content %}
-  <div class="icon">📵</div>
+  <div class="icon">🐢</div>
   <h1>Det holder for i dag{% if name %}, {{ name }}{% endif %}.</h1>
-  <p>Du har brukt opp den daglige internettkvoten din.</p>
-  <p>Tilgangen nullstilles ved midnatt. Gå ut og ta en tur — det gjør godt. 🌿</p>
+  <p>Du har brukt opp den daglige internettkvoten din, men du har fortsatt tilgang til internett med redusert hastighet ({{ throttle_kbps }} kbps).</p>
+  <p>De fleste apper og HTTPS-sider fungerer fortsatt — bare litt tregere enn vanlig.</p>
+  <p class="muted">Kvoten nullstilles ved midnatt.</p>
 {% endblock %}
