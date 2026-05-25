@@ -1,14 +1,16 @@
 [Unit]
 Description=WiFi Captive Portal - guest access with SMS OTP and Telegram approval
-After=network-online.target
+After=network-online.target dnsmasq.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/root/src/wifi-captive-portal
-ExecStart=/root/.local/bin/uv run gunicorn app:app -c gunicorn.conf.py
+User=root
+WorkingDirectory=/home/morgan/src/wifi-captive-portal
+ExecStart=/usr/local/bin/uv run gunicorn app:app -c gunicorn.conf.py
 Restart=on-failure
 RestartSec=30
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 [Install]
 WantedBy=multi-user.target

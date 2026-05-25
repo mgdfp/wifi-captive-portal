@@ -4,7 +4,7 @@ import time
 from datetime import date
 
 import store
-import unifi
+import gateway
 
 log = logging.getLogger(__name__)
 
@@ -28,8 +28,8 @@ def _run_reset(today: str) -> None:
             continue
         if user.get("throttled"):
             for mac in user.get("macs", []):
-                unifi.unthrottle_client(mac)
-                unifi.authorize_guest(mac)  # re-authorize in case failsafe had kicked them off
+                gateway.unthrottle_client(mac)
+                gateway.authorize_guest(mac)  # re-authorize in case failsafe had kicked them off
     store.reset_all_daily(today)
     log.info("Daily reset complete.")
 
@@ -67,7 +67,7 @@ def _check_throttle_failsafe(phone: str, user: dict, active: dict) -> None:
                 "%s (%s) still at %.0f kbps after throttle — kicking off WiFi.",
                 user["name"], mac, rate_kbps,
             )
-            unifi.unauthorize_guest(mac)
+            gateway.unauthorize_guest(mac)
             telegram_bot.send(
                 f"⚠️ Failsafe: {user['name']} kastet av WiFi "
                 f"({rate_kbps:.0f} kbps — throttling virket ikke)."
@@ -80,7 +80,7 @@ def _check_throttle_failsafe(phone: str, user: dict, active: dict) -> None:
 
 
 def _run_monitor() -> None:
-    active = unifi.fetch_active_clients()
+    active = gateway.fetch_active_clients()
     if active is None:
         log.warning("API error — skipping poll.")
         return
@@ -155,7 +155,7 @@ def _run_monitor() -> None:
         if seconds_today >= limit_seconds:
             log.info("Quota reached for %s — throttling to slow speed.", user["name"])
             for mac in macs:
-                unifi.throttle_client(mac)
+                gateway.throttle_client(mac)
             # Clear tx_bytes so failsafe gets a clean baseline on next poll
             store.update_guests(lambda g: g[phone].update({"throttled": True, "tx_bytes": {}}) if phone in g else None)
 

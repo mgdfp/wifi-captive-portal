@@ -7,7 +7,7 @@ import requests
 
 import sms
 import store
-import unifi
+import gateway
 
 _wifi_name = os.getenv("WIFI_NETWORK_NAME", "WiFi-nettverket")
 
@@ -134,7 +134,7 @@ def _handle_callback(callback_id: str, data: str) -> None:
 
         store.approve_user(phone, limit_seconds)
         store.add_mac_to_user(phone, mac)
-        unifi.authorize_guest(mac)
+        gateway.authorize_guest(mac)
         limit_str = _fmt_limit(limit_seconds)
         _answer_callback(callback_id, f"Godkjent — {limit_str}")
         send(f"✅ {name} er godkjent ({limit_str}).")
@@ -209,16 +209,16 @@ def _handle_callback(callback_id: str, data: str) -> None:
 
         elif action == "block":
             for mac in macs:
-                unifi.throttle_client(mac)
+                gateway.throttle_client(mac)
             store.set_throttled(phone, True)
             _answer_callback(callback_id, "Blokkert.")
             send(f"🚫 {user['name']} er blokkert. Bruk Nullstill for å åpne igjen.")
 
         elif action == "reset":
             for mac in macs:
-                unifi.unthrottle_client(mac)
+                gateway.unthrottle_client(mac)
                 # re-authorize in case admin had previously used "block" (which unauthorizes)
-                unifi.authorize_guest(mac)
+                gateway.authorize_guest(mac)
             store.update_guests(lambda g: g[phone].update({
                 "seconds_today": 0, "throttled": False, "tx_bytes": {}
             }) if phone in g else None)
@@ -227,7 +227,7 @@ def _handle_callback(callback_id: str, data: str) -> None:
 
         elif action == "delete":
             for mac in macs:
-                unifi.unauthorize_guest(mac)
+                gateway.unauthorize_guest(mac)
             store.delete_user(phone)
             _answer_callback(callback_id, "Slettet.")
             send(f"🗑️ {user['name']} er slettet.")
@@ -241,7 +241,7 @@ def _handle_callback(callback_id: str, data: str) -> None:
             return
         store.approve_user(phone, limit_seconds)
         for mac in user.get("macs", []):
-            unifi.authorize_guest(mac)
+            gateway.authorize_guest(mac)
         sms.send_sms(phone, f"Du har fått tilgang til internett — koble til {_wifi_name} på nytt.")
         limit_str = _fmt_limit(limit_seconds)
         _answer_callback(callback_id, f"Godkjent — {limit_str}")

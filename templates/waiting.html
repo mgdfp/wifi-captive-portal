@@ -2,7 +2,7 @@
 {% block title %}Venter på godkjenning{% endblock %}
 {% block head %}
 <script>
-  const pollUrl = "/api/status?sid={{ sid }}&next=" + encodeURIComponent("{{ target_url }}");
+  const pollUrl = "http://{{ portal_host }}/api/status?sid={{ sid }}&next=" + encodeURIComponent("{{ target_url }}");
   const TIMEOUT = 300;
   let remaining = TIMEOUT;
 
@@ -27,9 +27,9 @@
       const r = await fetch(pollUrl);
       const data = await r.json();
       if (data.status === "approved") {
-        window.location.href = data.redirect || "/success";
-      } else if (data.status === "denied" || data.status === "error") {
-        window.location.href = "/info";
+        window.location.href = data.redirect || "http://{{ portal_host }}/success";
+      } else if (data.status === "denied") {
+        window.location.href = "http://{{ portal_host }}/info";
       }
     } catch(e) {}
   }
@@ -37,7 +37,7 @@
   document.addEventListener("DOMContentLoaded", function() {
     updateCountdown();
     setInterval(tick, 1000);
-    setInterval(poll, 5000);
+    setInterval(poll, 2000);
   });
 </script>
 {% endblock %}

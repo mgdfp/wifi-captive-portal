@@ -18,20 +18,22 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+import gateway
 import monitor
 import sms
 import store
 import telegram_bot
-import unifi
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
-UDM_IP              = os.environ["UDM_IP"]
-UNIFI_API_KEY       = os.environ["UNIFI_API_KEY"]
-THROTTLE_DOWN_KBPS  = int(os.getenv("THROTTLE_DOWN_KBPS", "500"))
-THROTTLE_UP_KBPS    = int(os.getenv("THROTTLE_UP_KBPS", "250"))
+GUEST_IFACE         = os.getenv("GUEST_IFACE", "eth0")
+WAN_IFACE           = os.getenv("WAN_IFACE", "eth1")
+THROTTLE_DOWN_KBPS  = int(os.getenv("THROTTLE_DOWN_KBPS", "100"))
+THROTTLE_UP_KBPS    = int(os.getenv("THROTTLE_UP_KBPS", "100"))
+ALLOWED_LAN_IPS     = [ip.strip() for ip in os.getenv("ALLOWED_LAN_IPS", "").split(",") if ip.strip()]
+LAN_SUBNET          = os.getenv("LAN_SUBNET", "192.168.10.0/24")
 TWILIO_SID          = os.environ["TWILIO_ACCOUNT_SID"]
 TWILIO_TOKEN        = os.environ["TWILIO_AUTH_TOKEN"]
 TWILIO_FROM         = os.environ["TWILIO_FROM_NUMBER"]
@@ -44,13 +46,23 @@ ACTIVE_THRESHOLD    = int(os.getenv("ACTIVE_RATE_THRESHOLD_BYTES_PER_SEC", "6250
 FAILSAFE_KBPS       = int(os.getenv("FAILSAFE_KBPS", "2000"))
 ADMIN_EMAIL         = os.getenv("ADMIN_EMAIL", "")
 ADMIN_PHONE         = os.getenv("ADMIN_PHONE", "")
+PORTAL_HOST         = os.getenv("PORTAL_HOST", "192.168.21.2")
 OTP_TTL_SECONDS     = 600  # 10 minutes
 
 # ---------------------------------------------------------------------------
 # Module init
 # ---------------------------------------------------------------------------
 
-unifi.init(UDM_IP, UNIFI_API_KEY, THROTTLE_DOWN_KBPS, THROTTLE_UP_KBPS)
+gateway.init(
+    guest_iface=GUEST_IFACE,
+    wan_iface=WAN_IFACE,
+    throttle_down_kbps=THROTTLE_DOWN_KBPS,
+    throttle_up_kbps=THROTTLE_UP_KBPS,
+    portal_port=PORT,
+    allowed_lan_ips=ALLOWED_LAN_IPS,
+    lan_subnet=LAN_SUBNET,
+)
+gateway.setup_chains()
 sms.init(TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM)
 telegram_bot.init(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
 monitor.init(POLL_INTERVAL, ACTIVE_THRESHOLD, FAILSAFE_KBPS)
@@ -111,13 +123,15 @@ def _normalise_phone(raw: str) -> str:
 # Routes
 # ---------------------------------------------------------------------------
 
-@app.route("/guest/s/<site>")
-@app.route("/guest/s/<site>/")
-@app.route("/")
-def index(site=None):
-    """Entry point — UniFi redirects guests here with ?id=<mac>&t=<url>"""
-    mac = (request.args.get("id") or "").lower().strip()
-    target_url = request.args.get("url") or "http://google.com"
+@app.route("/", defaults={"_path": ""})
+@app.route("/<path:_path>")
+def index(_path=None):
+    """
+    Catches all HTTP — iptables REDIRECTs unauthorized clients here.
+    The catch-all path handles captive portal detection requests from iOS/Android/Windows.
+    """
+    mac = gateway.ip_to_mac(request.remote_addr) or ""
+    target_url = "http://www.google.com"
 
     if not mac:
         return render_template("portal.html", error=None)
@@ -129,7 +143,7 @@ def index(site=None):
             return render_template("exhausted.html", name=user["name"])
         if user.get("status") == "blocked":
             return render_template("info.html", admin_email=ADMIN_EMAIL, admin_phone=ADMIN_PHONE)
-        unifi.authorize_guest(mac)
+        gateway.authorize_guest(mac)
         log.info("Known device %s (%s) re-authorized.", mac, user["name"])
         return redirect(url_for("success", next=target_url))
 
@@ -228,7 +242,7 @@ def verify():
         if existing.get("status") == "blocked":
             return render_template("info.html", admin_email=ADMIN_EMAIL, admin_phone=ADMIN_PHONE)
         store.add_mac_to_user(phone, mac)
-        unifi.authorize_guest(mac)
+        gateway.authorize_guest(mac)
         log.info("Returning user %s (%s) connected from %s.", existing["name"], phone, mac)
         session.clear()
         return redirect(url_for("success", next=target_url))
@@ -236,7 +250,8 @@ def verify():
     store.add_blocked_user(phone, name, mac)
     telegram_bot.register_pending(sid, name, phone, mac)
     telegram_bot.notify_new_guest(sid, name, phone)
-    return redirect(url_for("waiting", sid=sid, next=target_url))
+    # Absolute redirect so the waiting page origin matches our server (avoids CORS on the poll).
+    return redirect(f"http://{PORTAL_HOST}" + url_for("waiting", sid=sid, next=target_url))
 
 
 @app.route("/waiting")
@@ -245,19 +260,23 @@ def waiting():
     if not sid:
         return redirect(url_for("index"))
     target_url = request.args.get("next", "http://google.com")
-    return render_template("waiting.html", sid=sid, target_url=target_url)
+    return render_template("waiting.html", sid=sid, target_url=target_url, portal_host=PORTAL_HOST)
 
 
 @app.route("/api/status")
 def api_status():
-    """Polled by the waiting page every 5 seconds."""
+    """Polled by the waiting page every 2 seconds."""
     sid = request.args.get("sid") or session.get("pending_sid")
     if not sid:
-        return jsonify({"status": "error"})
+        r = jsonify({"status": "error"})
+        r.headers["Access-Control-Allow-Origin"] = "*"
+        return r
 
     result = telegram_bot.get_pending_status(sid)
     if not result:
-        return jsonify({"status": "error"})
+        r = jsonify({"status": "error"})
+        r.headers["Access-Control-Allow-Origin"] = "*"
+        return r
 
     status = result["status"]
 
@@ -265,14 +284,20 @@ def api_status():
         target_url = request.args.get("next", session.get("target_url", "http://google.com"))
         telegram_bot.clear_pending(sid)
         session.clear()
-        return jsonify({"status": "approved", "redirect": url_for("success", next=target_url)})
+        r = jsonify({"status": "approved", "redirect": f"http://{PORTAL_HOST}/success?next={target_url}"})
+        r.headers["Access-Control-Allow-Origin"] = "*"
+        return r
 
     if status == "denied":
         telegram_bot.clear_pending(sid)
         session.clear()
-        return jsonify({"status": "denied"})
+        r = jsonify({"status": "denied"})
+        r.headers["Access-Control-Allow-Origin"] = "*"
+        return r
 
-    return jsonify({"status": "pending"})
+    r = jsonify({"status": "pending"})
+    r.headers["Access-Control-Allow-Origin"] = "*"
+    return r
 
 
 @app.route("/success")

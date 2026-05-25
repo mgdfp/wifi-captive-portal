@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Tilkoblet{% endblock %}
 {% block head %}
-<meta http-equiv="refresh" content="8;url={{ next_url }}">
+<meta http-equiv="refresh" content="2;url={{ next_url }}">
 <script>
   setTimeout(function() {
     window.location.href = "{{ next_url }}";
-  }, 8000);
+  }, 2000);
 </script>
 {% endblock %}
 {% block content %}
