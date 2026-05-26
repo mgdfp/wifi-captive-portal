@@ -94,6 +94,30 @@ def _safe_url(url: str | None) -> str:
     return _FALLBACK_URL
 
 
+def _original_url() -> str:
+    """
+    Reconstruct the URL the client was trying to reach before iptables redirected
+    them to the portal. Used as the post-auth redirect target so Android/iOS
+    connectivity checks (generate_204, hotspot-detect.html) get the expected
+    response and mark the network as having internet.
+    """
+    import ipaddress
+    host = request.headers.get("Host", "").split(":")[0]
+    if not host:
+        return _FALLBACK_URL
+    # Don't redirect back to private IPs (portal itself, UDM Pro, etc.)
+    try:
+        if ipaddress.ip_address(host).is_private:
+            return _FALLBACK_URL
+    except ValueError:
+        pass  # hostname, not an IP — fine
+    qs = request.query_string.decode("utf-8", errors="replace")
+    url = f"http://{request.headers.get('Host', host)}{request.path}"
+    if qs:
+        url += f"?{qs}"
+    return _safe_url(url)
+
+
 def _new_otp() -> str:
     return f"{secrets.randbelow(1000000):06d}"
 
@@ -139,7 +163,7 @@ def index(_path=None):
     The catch-all path handles captive portal detection requests from iOS/Android/Windows.
     """
     mac = gateway.ip_to_mac(request.remote_addr) or ""
-    target_url = "http://www.google.com"
+    target_url = _original_url()
 
     if not mac:
         return render_template("portal.html", error=None)
