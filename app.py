@@ -65,6 +65,7 @@ gateway.init(
     lan_subnet=LAN_SUBNET,
 )
 gateway.setup_chains()
+gateway.restore_state(store.load_guests())
 sms.init(TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM)
 telegram_bot.init(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
 monitor.init(POLL_INTERVAL, ACTIVE_THRESHOLD, FAILSAFE_KBPS)
