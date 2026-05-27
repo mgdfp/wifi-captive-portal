@@ -56,6 +56,7 @@ def add_blocked_user(phone: str, name: str, mac: str) -> None:
             "limit_seconds": None,
             "seconds_today": 0,
             "throttled": False,
+            "notify_throttle_sms": True,
             "last_reset_date": datetime.now().date().isoformat(),
             "registered_at": datetime.now().isoformat(),
             "tx_bytes": {},
@@ -79,6 +80,7 @@ def add_user(phone: str, name: str, mac: str, limit_seconds: int | None) -> None
             "limit_seconds": limit_seconds,
             "seconds_today": 0,
             "throttled": False,
+            "notify_throttle_sms": True,
             "last_reset_date": datetime.now().date().isoformat(),
             "registered_at": datetime.now().isoformat(),
             "tx_bytes": {},
@@ -105,6 +107,13 @@ def set_throttled(phone: str, throttled: bool) -> None:
     def _apply(guests):
         if phone in guests:
             guests[phone]["throttled"] = throttled
+    update_guests(_apply)
+
+
+def set_notify_throttle_sms(phone: str, enabled: bool) -> None:
+    def _apply(guests):
+        if phone in guests:
+            guests[phone]["notify_throttle_sms"] = enabled
     update_guests(_apply)
 
 

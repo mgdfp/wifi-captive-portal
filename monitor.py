@@ -3,8 +3,10 @@ import threading
 import time
 from datetime import date
 
+import sms
 import store
 import gateway
+import telegram_bot
 
 log = logging.getLogger(__name__)
 
@@ -159,6 +161,10 @@ def _run_monitor() -> None:
                 gateway.throttle_client(mac)
             # Clear tx_bytes so failsafe gets a clean baseline on next poll
             store.update_guests(lambda g: g[phone].update({"throttled": True, "tx_bytes": {}}) if phone in g else None)
+            if user.get("notify_throttle_sms", True):
+                if not sms.send_sms(phone, "Din daglige internettkvote er brukt opp. Hastigheten er redusert. Kvoten nullstilles ved midnatt."):
+                    log.warning("[%s] Failed to send throttle notification SMS.", phone)
+                telegram_bot.send(f"🐢 {user['name']} ({phone}) har nådd kvoten og er throttlet.")
 
 
 def run() -> None:
