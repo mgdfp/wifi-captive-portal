@@ -8,7 +8,7 @@ Same public API as unifi.py:
 Plus: setup_chains() — call once at startup to create iptables chains and tc qdiscs.
 
 Authorization:  per-MAC iptables rules (CAPTIVE_FORWARD / CAPTIVE_REDIRECT chains).
-Throttling:     tc HTB on guest NIC egress (download) + tc ingress police (upload).
+Throttling:     tc HTB on guest NIC egress (download) + tc ingress police (upload), matched by MAC so rules survive IP changes.
 Accounting:     per-MAC byte counters in CAPTIVE_ACCOUNTING chain.
 Client list:    ARP table + dnsmasq leases.
 """
@@ -28,13 +28,15 @@ _DNSMASQ_LEASES = Path("/var/lib/misc/dnsmasq.leases")
 _ALLOWED_LAN_IPS: list[str] = []   # specific IPs authorized guests may reach on the LAN
 _LAN_SUBNET = "192.168.10.0/24"    # everything else in this subnet is blocked
 
-# Remembers the IP at the time of throttle so unthrottle works even if the
-# client has since disconnected (and left the ARP table).
-_throttled_ips: dict[str, str] = {}
-
 # Remembers the guest IP at authorization time so the download accounting rule
 # can be removed even after the client leaves the ARP table.
 _authorized_ips: dict[str, str] = {}
+
+# Per-MAC tc minor allocation. Starts at 1000 to avoid the default class 1:999.
+# Process-local: _setup_tc() wipes the qdisc on startup, so a fresh counter
+# matches the kernel's actual tc state on restart.
+_mac_minors: dict[str, int] = {}
+_next_minor = 1000
 
 
 def init(
@@ -107,14 +109,14 @@ def ip_to_mac(ip: str) -> str | None:
     return None
 
 
-def _tc_ids(ip: str) -> tuple[str, int]:
-    """
-    Derive a unique tc class minor ID and filter prio from a guest IP.
-    Uses last two octets so the result is unique within any /16 or smaller subnet.
-    Returns (minor_str, prio_int).
-    """
-    octets = ip.split(".")
-    minor = int(octets[-2]) * 256 + int(octets[-1])
+def _tc_ids(mac: str) -> tuple[str, int]:
+    """Return (minor_str, prio_int) for a MAC, allocating on first use."""
+    minor = _mac_minors.get(mac)
+    if minor is None:
+        global _next_minor
+        minor = _next_minor
+        _mac_minors[mac] = minor
+        _next_minor += 1
     return str(minor), minor
 
 
@@ -299,32 +301,24 @@ def unauthorize_guest(mac: str) -> bool:
 
 def throttle_client(mac: str) -> bool:
     mac = mac.lower()
-    ip = _mac_to_ip(mac)
-    if not ip:
-        log.warning("[%s] throttle_client: no IP found in ARP/leases.", mac)
-        return False
-    _throttled_ips[mac] = ip
-    minor, prio = _tc_ids(ip)
+    minor, prio = _tc_ids(mac)
     burst_kb = max(_THROTTLE_UP_KBPS // 8, 4)
     try:
-        # Download cap: add an HTB class capped at the throttle rate, then a
-        # filter matching destination IP to steer packets into that class.
+        # Download cap: HTB class + flower filter matched by destination MAC.
         _run(["tc", "class", "add", "dev", _GUEST_IFACE,
               "parent", "1:", "classid", f"1:{minor}",
               "htb", "rate", f"{_THROTTLE_DOWN_KBPS}kbit",
                     "ceil", f"{_THROTTLE_DOWN_KBPS}kbit"])
-        # Each client gets a unique prio so its filter can be deleted individually.
         _run(["tc", "filter", "add", "dev", _GUEST_IFACE,
-              "parent", "1:", "protocol", "ip", "prio", str(prio),
-              "u32", "match", "ip", "dst", f"{ip}/32", "flowid", f"1:{minor}"])
-        # Upload cap: police packets from this IP on ingress, drop excess.
+              "parent", "1:", "protocol", "all", "prio", str(prio),
+              "flower", "dst_mac", mac, "flowid", f"1:{minor}"])
+        # Upload cap: police packets from this MAC on ingress, drop excess.
         _run(["tc", "filter", "add", "dev", _GUEST_IFACE,
-              "parent", "ffff:", "protocol", "ip", "prio", str(prio),
-              "u32", "match", "ip", "src", f"{ip}/32",
-              "police", "rate", f"{_THROTTLE_UP_KBPS}kbit",
-              "burst", f"{burst_kb}k", "drop", "flowid", ":1"])
-        log.info("[%s] Throttled to %d/%d kbps (IP %s).",
-                 mac, _THROTTLE_DOWN_KBPS, _THROTTLE_UP_KBPS, ip)
+              "parent", "ffff:", "protocol", "all", "prio", str(prio),
+              "flower", "src_mac", mac,
+              "action", "police", "rate", f"{_THROTTLE_UP_KBPS}kbit",
+              "burst", f"{burst_kb}k", "drop"])
+        log.info("[%s] Throttled to %d/%d kbps.", mac, _THROTTLE_DOWN_KBPS, _THROTTLE_UP_KBPS)
         return True
     except subprocess.CalledProcessError as e:
         log.error("throttle_client %s: %s", mac, e)
@@ -333,16 +327,12 @@ def throttle_client(mac: str) -> bool:
 
 def unthrottle_client(mac: str) -> bool:
     mac = mac.lower()
-    ip = _throttled_ips.pop(mac, None) or _mac_to_ip(mac)
-    if not ip:
-        log.info("[%s] unthrottle_client: no IP found, assuming rules already absent.", mac)
-        return True
-    minor, prio = _tc_ids(ip)
+    minor, prio = _tc_ids(mac)
     # Errors are expected if rules were never applied or already removed.
     _run(["tc", "filter", "del", "dev", _GUEST_IFACE, "parent", "1:", "prio", str(prio)], check=False)
     _run(["tc", "filter", "del", "dev", _GUEST_IFACE, "parent", "ffff:", "prio", str(prio)], check=False)
     _run(["tc", "class", "del", "dev", _GUEST_IFACE, "classid", f"1:{minor}"], check=False)
-    log.info("[%s] Throttle removed (IP %s).", mac, ip)
+    log.info("[%s] Throttle removed.", mac)
     return True
 
 
