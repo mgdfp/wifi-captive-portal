@@ -178,10 +178,13 @@ def _handle_callback(callback_id: str, data: str) -> None:
             ]
             status_str = "⏳ blokkert (venter)"
         else:
+            notify = user.get("notify_throttle_sms", True)
+            notify_label = "🔔 SMS-varsling: PÅ" if notify else "🔕 SMS-varsling: AV"
             keyboard = [
                 [{"text": "✏️ Endre kvote",    "callback_data": f"action:{phone}:quota"}],
                 [{"text": "🚫 Blokker",        "callback_data": f"action:{phone}:block"}],
                 [{"text": "🔄 Nullstill",      "callback_data": f"action:{phone}:reset"}],
+                [{"text": notify_label,         "callback_data": f"action:{phone}:toggle_sms"}],
                 [{"text": "🗑️ Slett",          "callback_data": f"action:{phone}:delete"}],
             ]
             status_str = "🚫 blokkert" if user.get("throttled") else f"{used_min}min brukt"
@@ -231,6 +234,13 @@ def _handle_callback(callback_id: str, data: str) -> None:
             store.delete_user(phone)
             _answer_callback(callback_id, "Slettet.")
             send(f"🗑️ {user['name']} er slettet.")
+
+        elif action == "toggle_sms":
+            current = user.get("notify_throttle_sms", True)
+            store.set_notify_throttle_sms(phone, not current)
+            state = "PÅ" if not current else "AV"
+            _answer_callback(callback_id, f"SMS-varsling {state}.")
+            send(f"{'🔔' if not current else '🔕'} SMS-varsling ved kvotenådd er nå {state} for {user['name']}.")
 
     elif parts[0] == "approve_blocked" and len(parts) == 3:
         phone, raw_limit = parts[1], parts[2]
