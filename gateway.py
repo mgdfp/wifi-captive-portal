@@ -135,6 +135,28 @@ def setup_chains() -> None:
     log.info("Gateway initialized (guest=%s, wan=%s).", _GUEST_IFACE, _WAN_IFACE)
 
 
+def restore_state(guests: dict) -> None:
+    """Re-apply authorization and throttle rules from persisted guest state.
+
+    Call after setup_chains() so that existing guests are not disrupted by a
+    service restart.  authorize_guest() and throttle_client() are idempotent
+    (they check for existing rules before inserting), so this is safe to call
+    even if some rules survived the restart.
+    """
+    restored = 0
+    throttled = 0
+    for phone, user in guests.items():
+        if user.get("status") == "blocked":
+            continue
+        for mac in user.get("macs", []):
+            authorize_guest(mac)
+            restored += 1
+            if user.get("throttled"):
+                throttle_client(mac)
+                throttled += 1
+    log.info("Restored state: %d authorization(s), %d throttle rule(s).", restored, throttled)
+
+
 def _setup_iptables() -> None:
     # --- NAT ---
 
