@@ -20,7 +20,13 @@
 
     <label for="phone">Telefonnummer</label>
     <div class="phone-row">
-      <span class="phone-prefix">+47</span>
+      <select name="country" class="phone-country" aria-label="Landkode">
+        <option value="NO" selected>+47</option>
+        <option value="SE">+46</option>
+        <option value="LT">+370</option>
+        <option value="PL">+48</option>
+        <option value="DE">+49</option>
+      </select>
       <input type="tel" id="phone" name="phone" placeholder="12345678"
              inputmode="numeric" autocomplete="tel" required>
     </div>

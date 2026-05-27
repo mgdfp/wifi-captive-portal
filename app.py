@@ -6,6 +6,7 @@ import threading
 import time
 from datetime import datetime
 
+import phonenumbers
 from dotenv import load_dotenv
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
@@ -137,18 +138,15 @@ def _clean_expired() -> None:
                 del _mac_attempts[mac]
 
 
-def _normalise_phone(raw: str) -> str:
-    """Normalise to E.164. Bare 8 digits get +47 prepended (Norwegian default)."""
-    p = raw.strip().replace(" ", "").replace("-", "").replace(".", "")
-    if p.startswith("0047"):
-        p = "+47" + p[4:]
-    elif p.startswith("00"):
-        p = "+" + p[2:]
-    elif p.startswith("47") and len(p) == 10:
-        p = "+" + p
-    elif not p.startswith("+"):
-        p = "+47" + p
-    return p
+def _parse_phone(raw: str, country: str) -> str | None:
+    """Parse a phone number with country code, return E.164 string or None if invalid."""
+    try:
+        num = phonenumbers.parse(raw.strip(), country)
+        if phonenumbers.is_valid_number(num):
+            return phonenumbers.format_number(num, phonenumbers.PhoneNumberFormat.E164)
+    except phonenumbers.NumberParseException:
+        pass
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +191,7 @@ def submit():
     """Receive name + phone, send OTP."""
     name = request.form.get("name", "").strip()
     raw_phone = request.form.get("phone", "").strip()
+    country = request.form.get("country", "NO").strip().upper()
 
     # MAC and target URL must come from the server-set session, not client form fields.
     mac = session.get("mac", "")
@@ -201,9 +200,9 @@ def submit():
     if not name or not raw_phone:
         return render_template("portal.html", mac=mac, target_url=target_url, error="Fyll inn både navn og telefonnummer.")
 
-    phone = _normalise_phone(raw_phone)
-    if not (phone.startswith("+47") and len(phone) == 11 and phone[1:].isdigit()):
-        return render_template("portal.html", mac=mac, target_url=target_url, error="Ugyldig telefonnummer. Skriv inn 8 siffer.")
+    phone = _parse_phone(raw_phone, country)
+    if not phone:
+        return render_template("portal.html", mac=mac, target_url=target_url, error="Ugyldig telefonnummer. Sjekk at du har valgt riktig land og skrevet inn riktig nummer.")
 
     existing = store.find_by_phone(phone)
     if existing and existing.get("status") == "blocked":
