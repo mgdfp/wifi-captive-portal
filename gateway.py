@@ -148,7 +148,7 @@ def restore_state(guests: dict) -> None:
     for phone, user in guests.items():
         if user.get("status") == "blocked":
             continue
-        for mac in user.get("macs", []):
+        for mac in user.get("devices", {}):
             authorize_guest(mac)
             restored += 1
             if user.get("throttled"):
