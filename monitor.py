@@ -29,7 +29,7 @@ def _run_reset(today: str) -> None:
         if user.get("status") == "blocked":
             continue
         if user.get("throttled"):
-            for mac in user.get("macs", []):
+            for mac in user.get("devices", {}):
                 gateway.unthrottle_client(mac)
                 gateway.authorize_guest(mac)  # re-authorize in case failsafe had kicked them off
     store.reset_all_daily(today)
@@ -38,7 +38,7 @@ def _run_reset(today: str) -> None:
 
 def _check_throttle_failsafe(phone: str, user: dict, active: dict) -> None:
     import telegram_bot
-    macs = user.get("macs", [])
+    macs = list(user.get("devices", {}).keys())
     tx_bytes_map = dict(user.get("tx_bytes", {}))
     changed = False
 
@@ -98,7 +98,7 @@ def _run_monitor() -> None:
             _check_throttle_failsafe(phone, user, active)
             continue
 
-        macs = user.get("macs", [])
+        macs = list(user.get("devices", {}).keys())
         limit_seconds = user.get("limit_seconds")
         tx_bytes_map = dict(user.get("tx_bytes", {}))
 
@@ -112,7 +112,8 @@ def _run_monitor() -> None:
                 tx_bytes_map.pop(mac, None)
                 continue
 
-            if mac not in user.get("devices", {}):
+            device_info = user.get("devices", {}).get(mac, {})
+            if not device_info.get("hostname") and not device_info.get("oui"):
                 hostname = client.get("hostname") or ""
                 oui = client.get("oui") or ""
                 if hostname or oui:

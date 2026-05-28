@@ -163,10 +163,8 @@ def _handle_callback(callback_id: str, data: str) -> None:
         _answer_callback(callback_id)
         used_min = user.get("seconds_today", 0) // 60
         limit_str = _fmt_limit(user.get("limit_seconds"))
-        devices = user.get("devices", {})
         device_lines = []
-        for mac in user.get("macs", []):
-            info = devices.get(mac, {})
+        for mac, info in user.get("devices", {}).items():
             hostname = info.get("hostname", "")
             oui = info.get("oui", "")
             label = hostname or oui or "ukjent enhet"
@@ -200,7 +198,7 @@ def _handle_callback(callback_id: str, data: str) -> None:
         if not user:
             _answer_callback(callback_id, "Bruker ikke funnet.")
             return
-        macs = user.get("macs", [])
+        macs = list(user.get("devices", {}).keys())
 
         if action == "approve":
             _answer_callback(callback_id)
@@ -250,7 +248,7 @@ def _handle_callback(callback_id: str, data: str) -> None:
             _answer_callback(callback_id, "Bruker ikke funnet.")
             return
         store.approve_user(phone, limit_seconds)
-        for mac in user.get("macs", []):
+        for mac in user.get("devices", {}):
             gateway.authorize_guest(mac)
         sms.send_sms(phone, f"Du har fått tilgang til internett — koble til {_wifi_name} på nytt.")
         limit_str = _fmt_limit(limit_seconds)
@@ -294,7 +292,7 @@ def _handle_command(text: str) -> None:
                 used_min = user.get("seconds_today", 0) // 60
                 throttled = user.get("throttled", False)
                 limit_str = _fmt_limit(user.get("limit_seconds"))
-                n = len(user.get("macs", []))
+                n = len(user.get("devices", {}))
                 status = "🚫 throttlet" if throttled else f"{used_min}min brukt"
                 lines.append(f"• {user['name']} — {status} / {limit_str} — {n} enhet{'er' if n > 1 else ''}")
         if blocked:

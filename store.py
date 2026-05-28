@@ -38,7 +38,7 @@ def find_by_mac(mac: str) -> tuple[str, dict] | None:
     """Return (phone, user) for the user who owns this MAC, or None."""
     mac = mac.lower()
     for phone, user in load_guests().items():
-        if mac in user.get("macs", []):
+        if mac in user.get("devices", {}):
             return phone, user
     return None
 
@@ -52,7 +52,7 @@ def add_blocked_user(phone: str, name: str, mac: str) -> None:
         guests[phone] = {
             "name": name,
             "status": "blocked",
-            "macs": [mac.lower()],
+            "devices": {mac.lower(): {"hostname": "", "oui": ""}},
             "limit_seconds": None,
             "seconds_today": 0,
             "throttled": False,
@@ -76,7 +76,7 @@ def add_user(phone: str, name: str, mac: str, limit_seconds: int | None) -> None
     def _apply(guests):
         guests[phone] = {
             "name": name,
-            "macs": [mac.lower()],
+            "devices": {mac.lower(): {"hostname": "", "oui": ""}},
             "limit_seconds": limit_seconds,
             "seconds_today": 0,
             "throttled": False,
@@ -91,8 +91,8 @@ def add_user(phone: str, name: str, mac: str, limit_seconds: int | None) -> None
 def add_mac_to_user(phone: str, mac: str) -> None:
     def _apply(guests):
         mac_lower = mac.lower()
-        if phone in guests and mac_lower not in guests[phone]["macs"]:
-            guests[phone]["macs"].append(mac_lower)
+        if phone in guests and mac_lower not in guests[phone].get("devices", {}):
+            guests[phone].setdefault("devices", {})[mac_lower] = {"hostname": "", "oui": ""}
     update_guests(_apply)
 
 
