@@ -45,6 +45,8 @@ PORT                = int(os.getenv("PORT", "80"))
 POLL_INTERVAL       = int(os.getenv("POLL_INTERVAL_SECONDS", "300"))
 ACTIVE_THRESHOLD    = int(os.getenv("ACTIVE_RATE_THRESHOLD_BYTES_PER_SEC", "6250"))
 FAILSAFE_KBPS       = int(os.getenv("FAILSAFE_KBPS", "2000"))
+_low_limit          = os.getenv("TWILIO_LOW_LIMIT")
+TWILIO_LOW_LIMIT    = float(_low_limit) if _low_limit else None
 ADMIN_EMAIL         = os.getenv("ADMIN_EMAIL", "")
 ADMIN_PHONE         = os.getenv("ADMIN_PHONE", "")
 PORTAL_HOST         = os.getenv("PORTAL_HOST", "192.168.21.2")
@@ -68,7 +70,7 @@ gateway.setup_chains()
 gateway.restore_state(store.load_guests())
 sms.init(TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM)
 telegram_bot.init(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
-monitor.init(POLL_INTERVAL, ACTIVE_THRESHOLD, FAILSAFE_KBPS)
+monitor.init(POLL_INTERVAL, ACTIVE_THRESHOLD, FAILSAFE_KBPS, twilio_low_balance=TWILIO_LOW_LIMIT)
 
 store.GUESTS_FILE.parent.mkdir(exist_ok=True)
 

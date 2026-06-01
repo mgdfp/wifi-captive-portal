@@ -13,13 +13,15 @@ log = logging.getLogger(__name__)
 _poll_interval = 300
 _active_threshold = 6250       # bytes/sec
 _failsafe_threshold = 250000   # bytes/sec (2 Mbps) — kick if throttle clearly not holding
+_low_balance_limit: float | None = None
 
 
-def init(poll_interval: int, active_threshold: int, failsafe_kbps: int = 2000) -> None:
-    global _poll_interval, _active_threshold, _failsafe_threshold
+def init(poll_interval: int, active_threshold: int, failsafe_kbps: int = 2000, twilio_low_balance: float | None = None) -> None:
+    global _poll_interval, _active_threshold, _failsafe_threshold, _low_balance_limit
     _poll_interval = poll_interval
     _active_threshold = active_threshold
     _failsafe_threshold = failsafe_kbps * 1000 / 8
+    _low_balance_limit = twilio_low_balance
 
 
 def _run_reset(today: str) -> None:
@@ -34,6 +36,14 @@ def _run_reset(today: str) -> None:
                 gateway.authorize_guest(mac)  # re-authorize in case failsafe had kicked them off
     store.reset_all_daily(today)
     log.info("Daily reset complete.")
+
+    if _low_balance_limit is not None:
+        balance = sms.get_balance()
+        if balance is not None and balance < _low_balance_limit:
+            telegram_bot.send(
+                f"⚠️ Twilio-saldo lav: ${balance:.2f} (grense: ${_low_balance_limit:.2f}). Husk å fylle på!"
+            )
+            log.warning("Twilio balance $%.2f is below threshold $%.2f.", balance, _low_balance_limit)
 
 
 def _check_throttle_failsafe(phone: str, user: dict, active: dict) -> None:

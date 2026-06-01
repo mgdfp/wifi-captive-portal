@@ -41,6 +41,22 @@ def send_sms(to_number: str, body: str) -> bool:
         return False
 
 
+def get_balance() -> float | None:
+    if not all([_SID, _TOKEN]):
+        return None
+    try:
+        resp = requests.get(
+            f"https://api.twilio.com/2010-04-01/Accounts/{_SID}/Balance.json",
+            auth=(_SID, _TOKEN),
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return float(resp.json()["balance"])
+    except (requests.RequestException, KeyError, ValueError) as e:
+        log.error("Failed to fetch Twilio balance: %s", e)
+        return None
+
+
 def send_otp(to_number: str, code: str) -> bool:
     if not all([_SID, _TOKEN, _FROM, to_number]):
         log.error("Twilio not configured or missing destination number.")
