@@ -278,7 +278,14 @@ def _handle_command(text: str) -> None:
     text = text.strip()
     cmd = text.lower().split()[0] if text else ""
 
-    if cmd == "/list":
+    if cmd == "/balance":
+        balance = sms.get_balance()
+        if balance is None:
+            send("❌ Kunne ikke hente Twilio-saldo.")
+        else:
+            send(f"💰 Twilio-saldo: ${balance:.2f}")
+
+    elif cmd == "/list":
         guests = store.load_guests()
         if not guests:
             send("Ingen brukere registrert ennå.")
@@ -325,7 +332,8 @@ def _handle_command(text: str) -> None:
         send(
             "Tilgjengelige kommandoer:\n"
             "/list — vis alle brukere\n"
-            "/modify — endre kvote / blokker / nullstill"
+            "/modify — endre kvote / blokker / nullstill\n"
+            "/balance — sjekk Twilio-saldo"
         )
 
 
@@ -378,8 +386,9 @@ def _run() -> None:
 
 def _register_commands() -> None:
     _post("setMyCommands", json={"commands": [
-        {"command": "list",   "description": "Vis alle brukere og forbruk"},
-        {"command": "modify", "description": "Endre kvote / blokker / nullstill"},
+        {"command": "list",    "description": "Vis alle brukere og forbruk"},
+        {"command": "modify",  "description": "Endre kvote / blokker / nullstill"},
+        {"command": "balance", "description": "Sjekk Twilio-saldo"},
     ]})
 
 
