@@ -8,7 +8,10 @@ Same public API as unifi.py:
 Plus: setup_chains() — call once at startup to create iptables chains and tc qdiscs.
 
 Authorization:  per-MAC iptables rules (CAPTIVE_FORWARD / CAPTIVE_REDIRECT chains).
-Throttling:     tc HTB on guest NIC egress (download) + tc ingress police (upload), matched by MAC so rules survive IP changes.
+Throttling:     tc HTB on guest NIC egress (download) + tc HTB on an IFB device fed
+                from guest NIC ingress (upload), matched by MAC so rules survive IP changes.
+                Upload is *shaped* (queued), not policed (dropped), so TLS handshakes and
+                push-notification keepalives survive a throttle — they just go slowly.
 Accounting:     per-MAC byte counters in CAPTIVE_ACCOUNTING chain.
 Client list:    ARP table + dnsmasq leases.
 """
@@ -21,6 +24,7 @@ log = logging.getLogger(__name__)
 
 _GUEST_IFACE = "eth0"
 _WAN_IFACE = "eth1"
+_IFB_IFACE = "ifb0"   # intermediate device used to shape guest upload (ingress can't be queued directly)
 _THROTTLE_DOWN_KBPS = 100
 _THROTTLE_UP_KBPS = 100
 _PORTAL_PORT = 80
@@ -240,6 +244,7 @@ def _setup_iptables() -> None:
 
 
 def _setup_tc() -> None:
+    # --- Download (guest NIC egress) ---
     # HTB root qdisc on the guest NIC controls download speed per client.
     # Class 1:999 is the default (catch-all) class at full speed.
     # Throttled clients get their own class (1:<minor>) with a rate cap.
@@ -248,9 +253,29 @@ def _setup_tc() -> None:
     _run(["tc", "class", "add", "dev", _GUEST_IFACE,
           "parent", "1:", "classid", "1:999", "htb", "rate", "1gbit"])
 
-    # Ingress qdisc on the guest NIC is used to police upload from throttled clients.
+    # --- Upload (guest NIC ingress, shaped via IFB) ---
+    # A NIC's ingress can only be policed (drop), not queued. Dropping breaks TLS
+    # handshakes and push keepalives, so instead we redirect all guest ingress to
+    # an IFB device and shape it there with HTB — excess is queued/delayed, not dropped.
+    _run(["modprobe", "ifb"], check=False)
+    _run(["ip", "link", "add", _IFB_IFACE, "type", "ifb"], check=False)  # no-op if it exists
+    _run(["ip", "link", "set", _IFB_IFACE, "up"])
+
+    # HTB on the IFB device mirrors the download side: default 999 = full speed,
+    # throttled clients get a 1:<minor> class matched by source MAC.
+    _run(["tc", "qdisc", "del", "dev", _IFB_IFACE, "root"], check=False)
+    _run(["tc", "qdisc", "add", "dev", _IFB_IFACE, "root", "handle", "1:", "htb", "default", "999"])
+    _run(["tc", "class", "add", "dev", _IFB_IFACE,
+          "parent", "1:", "classid", "1:999", "htb", "rate", "1gbit"])
+
+    # Redirect every packet arriving on the guest NIC to the IFB device. IFB shapes
+    # it then reinjects it into the normal receive path, so forwarding and the
+    # CAPTIVE_ACCOUNTING counters are unaffected.
     _run(["tc", "qdisc", "del", "dev", _GUEST_IFACE, "ingress"], check=False)
     _run(["tc", "qdisc", "add", "dev", _GUEST_IFACE, "handle", "ffff:", "ingress"])
+    _run(["tc", "filter", "add", "dev", _GUEST_IFACE, "parent", "ffff:",
+          "protocol", "all", "prio", "1", "u32", "match", "u32", "0", "0",
+          "action", "mirred", "egress", "redirect", "dev", _IFB_IFACE])
 
 
 # ---------------------------------------------------------------------------
@@ -324,9 +349,8 @@ def unauthorize_guest(mac: str) -> bool:
 def throttle_client(mac: str) -> bool:
     mac = mac.lower()
     minor, prio = _tc_ids(mac)
-    burst_kb = max(_THROTTLE_UP_KBPS // 8, 4)
     try:
-        # Download cap: HTB class + flower filter matched by destination MAC.
+        # Download cap: HTB class + flower filter matched by destination MAC on the guest NIC.
         _run(["tc", "class", "add", "dev", _GUEST_IFACE,
               "parent", "1:", "classid", f"1:{minor}",
               "htb", "rate", f"{_THROTTLE_DOWN_KBPS}kbit",
@@ -334,12 +358,15 @@ def throttle_client(mac: str) -> bool:
         _run(["tc", "filter", "add", "dev", _GUEST_IFACE,
               "parent", "1:", "protocol", "all", "prio", str(prio),
               "flower", "dst_mac", mac, "flowid", f"1:{minor}"])
-        # Upload cap: police packets from this MAC on ingress, drop excess.
-        _run(["tc", "filter", "add", "dev", _GUEST_IFACE,
-              "parent", "ffff:", "protocol", "all", "prio", str(prio),
-              "flower", "src_mac", mac,
-              "action", "police", "rate", f"{_THROTTLE_UP_KBPS}kbit",
-              "burst", f"{burst_kb}k", "drop"])
+        # Upload cap: HTB class + flower filter matched by source MAC on the IFB device.
+        # Shaping (queue/delay) rather than policing (drop) keeps connections alive at low speed.
+        _run(["tc", "class", "add", "dev", _IFB_IFACE,
+              "parent", "1:", "classid", f"1:{minor}",
+              "htb", "rate", f"{_THROTTLE_UP_KBPS}kbit",
+                    "ceil", f"{_THROTTLE_UP_KBPS}kbit"])
+        _run(["tc", "filter", "add", "dev", _IFB_IFACE,
+              "parent", "1:", "protocol", "all", "prio", str(prio),
+              "flower", "src_mac", mac, "flowid", f"1:{minor}"])
         log.info("[%s] Throttled to %d/%d kbps.", mac, _THROTTLE_DOWN_KBPS, _THROTTLE_UP_KBPS)
         return True
     except subprocess.CalledProcessError as e:
@@ -351,9 +378,12 @@ def unthrottle_client(mac: str) -> bool:
     mac = mac.lower()
     minor, prio = _tc_ids(mac)
     # Errors are expected if rules were never applied or already removed.
+    # Download path on the guest NIC.
     _run(["tc", "filter", "del", "dev", _GUEST_IFACE, "parent", "1:", "prio", str(prio)], check=False)
-    _run(["tc", "filter", "del", "dev", _GUEST_IFACE, "parent", "ffff:", "prio", str(prio)], check=False)
     _run(["tc", "class", "del", "dev", _GUEST_IFACE, "classid", f"1:{minor}"], check=False)
+    # Upload path on the IFB device.
+    _run(["tc", "filter", "del", "dev", _IFB_IFACE, "parent", "1:", "prio", str(prio)], check=False)
+    _run(["tc", "class", "del", "dev", _IFB_IFACE, "classid", f"1:{minor}"], check=False)
     log.info("[%s] Throttle removed.", mac)
     return True
 
