@@ -252,6 +252,7 @@ def _setup_tc() -> None:
     _run(["tc", "qdisc", "add", "dev", _GUEST_IFACE, "root", "handle", "1:", "htb", "default", "999"])
     _run(["tc", "class", "add", "dev", _GUEST_IFACE,
           "parent", "1:", "classid", "1:999", "htb", "rate", "1gbit"])
+    _run(["tc", "qdisc", "add", "dev", _GUEST_IFACE, "parent", "1:999", "fq_codel"])
 
     # --- Upload (guest NIC ingress, shaped via IFB) ---
     # A NIC's ingress can only be policed (drop), not queued. Dropping breaks TLS
@@ -267,6 +268,7 @@ def _setup_tc() -> None:
     _run(["tc", "qdisc", "add", "dev", _IFB_IFACE, "root", "handle", "1:", "htb", "default", "999"])
     _run(["tc", "class", "add", "dev", _IFB_IFACE,
           "parent", "1:", "classid", "1:999", "htb", "rate", "1gbit"])
+    _run(["tc", "qdisc", "add", "dev", _IFB_IFACE, "parent", "1:999", "fq_codel"])
 
     # Redirect every packet arriving on the guest NIC to the IFB device. IFB shapes
     # it then reinjects it into the normal receive path, so forwarding and the
@@ -351,19 +353,25 @@ def throttle_client(mac: str) -> bool:
     minor, prio = _tc_ids(mac)
     try:
         # Download cap: HTB class + flower filter matched by destination MAC on the guest NIC.
+        # fq_codel leaf gives each flow a fair share and bounds latency, so a bulk
+        # background flow (iCloud/photo sync) can't starve interactive traffic like
+        # messaging at the low throttle rate — without it the pfifo leaf tail-drops.
         _run(["tc", "class", "add", "dev", _GUEST_IFACE,
               "parent", "1:", "classid", f"1:{minor}",
               "htb", "rate", f"{_THROTTLE_DOWN_KBPS}kbit",
                     "ceil", f"{_THROTTLE_DOWN_KBPS}kbit"])
+        _run(["tc", "qdisc", "add", "dev", _GUEST_IFACE, "parent", f"1:{minor}", "fq_codel"])
         _run(["tc", "filter", "add", "dev", _GUEST_IFACE,
               "parent", "1:", "protocol", "all", "prio", str(prio),
               "flower", "dst_mac", mac, "flowid", f"1:{minor}"])
         # Upload cap: HTB class + flower filter matched by source MAC on the IFB device.
-        # Shaping (queue/delay) rather than policing (drop) keeps connections alive at low speed.
+        # Shaping (queue/delay) rather than policing (drop), plus an fq_codel leaf, keeps
+        # interactive connections alive at low speed.
         _run(["tc", "class", "add", "dev", _IFB_IFACE,
               "parent", "1:", "classid", f"1:{minor}",
               "htb", "rate", f"{_THROTTLE_UP_KBPS}kbit",
                     "ceil", f"{_THROTTLE_UP_KBPS}kbit"])
+        _run(["tc", "qdisc", "add", "dev", _IFB_IFACE, "parent", f"1:{minor}", "fq_codel"])
         _run(["tc", "filter", "add", "dev", _IFB_IFACE,
               "parent", "1:", "protocol", "all", "prio", str(prio),
               "flower", "src_mac", mac, "flowid", f"1:{minor}"])
