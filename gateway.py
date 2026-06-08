@@ -162,6 +162,15 @@ def restore_state(guests: dict) -> None:
 
 
 def _setup_iptables() -> None:
+    # --- INPUT ---
+
+    # Allow DHCP relay: when UDM Pro relays DHCP requests it unicasts them to
+    # 192.168.21.2:67 — without this rule a DROP INPUT policy would silently
+    # discard them before dnsmasq sees them.
+    if not _ipt_exists("INPUT", "-i", _GUEST_IFACE, "-p", "udp", "--dport", "67", "-j", "ACCEPT"):
+        _run(["iptables", "-I", "INPUT", "1",
+              "-i", _GUEST_IFACE, "-p", "udp", "--dport", "67", "-j", "ACCEPT"])
+
     # --- NAT ---
 
     # Masquerade all guest traffic leaving on the WAN interface.
