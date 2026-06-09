@@ -178,6 +178,16 @@ def _setup_iptables() -> None:
         _run(["iptables", "-t", "nat", "-A", "POSTROUTING",
               "-o", _WAN_IFACE, "-j", "MASQUERADE"])
 
+    # Skip masquerade for return traffic on LAN-initiated connections. The VM never
+    # sees the outbound SYN (it goes UDM→client directly), so conntrack marks these
+    # responses INVALID. Without this, the source IP gets rewritten to the VM's LAN IP
+    # and the initiating host discards the reply as unexpected.
+    if not _ipt_exists("POSTROUTING", "-o", _WAN_IFACE,
+                        "-m", "state", "--state", "INVALID", "-j", "RETURN", table="nat"):
+        _run(["iptables", "-t", "nat", "-I", "POSTROUTING", "1",
+              "-o", _WAN_IFACE,
+              "-m", "state", "--state", "INVALID", "-j", "RETURN"])
+
     # CAPTIVE_REDIRECT: HTTP from the guest NIC lands here.
     # Authorized MACs get a RETURN rule inserted at the front; everyone else
     # hits the REDIRECT at the end and is sent to the captive portal.
@@ -250,6 +260,20 @@ def _setup_iptables() -> None:
         for ip in _ALLOWED_LAN_IPS:
             _run(["iptables", "-A", "CAPTIVE_VLAN10", "-d", ip, "-j", "CAPTIVE_FORWARD"])
         _run(["iptables", "-A", "CAPTIVE_VLAN10", "-j", "DROP"])
+
+    # Allow return traffic from VLAN21 clients for connections initiated from any LAN
+    # (VLAN10, VLAN1, etc.). The outbound SYN goes UDM→client directly (VM never sees
+    # it), so conntrack marks the response INVALID. These flows are always INVALID on
+    # this VM — conntrack never transitions to ESTABLISHED for them — so INVALID alone
+    # is sufficient and avoids accidentally bypassing CAPTIVE_ACCOUNTING for authorized
+    # guests' own ESTABLISHED traffic.
+    if not _ipt_exists("FORWARD", "-i", _GUEST_IFACE, "-o", _WAN_IFACE,
+                        "-m", "state", "--state", "INVALID",
+                        "-j", "ACCEPT"):
+        _run(["iptables", "-I", "FORWARD", "1",
+              "-i", _GUEST_IFACE, "-o", _WAN_IFACE,
+              "-m", "state", "--state", "INVALID",
+              "-j", "ACCEPT"])
 
 
 def _setup_tc() -> None:
