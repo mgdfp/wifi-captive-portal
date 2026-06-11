@@ -13,7 +13,11 @@ Throttling:     tc HTB on guest NIC egress (download) + tc HTB on an IFB device 
                 Upload is *shaped* (queued), not policed (dropped), so TLS handshakes and
                 push-notification keepalives survive a throttle — they just go slowly.
 Accounting:     per-MAC byte counters in CAPTIVE_ACCOUNTING chain.
-Client list:    ARP table + dnsmasq leases.
+Client list:    ARP table on the guest NIC.
+
+DHCP/DNS are served by the UDM Pro on VLAN21; the UDM's DHCP hands out this VM's
+IP as the default gateway, so clients stay L2-adjacent and their real MACs are
+visible here. This VM runs no DHCP server.
 """
 import logging
 import re
@@ -28,7 +32,6 @@ _IFB_IFACE = "ifb0"   # intermediate device used to shape guest upload (ingress 
 _THROTTLE_DOWN_KBPS = 100
 _THROTTLE_UP_KBPS = 100
 _PORTAL_PORT = 80
-_DNSMASQ_LEASES = Path("/var/lib/misc/dnsmasq.leases")
 _ALLOWED_LAN_IPS: list[str] = []   # specific IPs authorized guests may reach on the LAN
 _LAN_SUBNET = "192.168.10.0/24"    # everything else in this subnet is blocked
 
@@ -81,7 +84,8 @@ def _ipt_exists(*args: str, table: str = "filter") -> bool:
 
 
 def _mac_to_ip(mac: str) -> str | None:
-    """Current IP for a MAC: ARP table first, dnsmasq leases as fallback."""
+    """Current IP for a MAC from the ARP table. Clients are L2-adjacent (this VM
+    is their default gateway), so any client we interact with has an entry."""
     try:
         for line in Path("/proc/net/arp").read_text().splitlines()[1:]:
             parts = line.split()
@@ -91,12 +95,6 @@ def _mac_to_ip(mac: str) -> str | None:
                 return parts[0]
     except OSError:
         pass
-    if _DNSMASQ_LEASES.exists():
-        for line in _DNSMASQ_LEASES.read_text().splitlines():
-            parts = line.split()
-            # dnsmasq lease format: expiry-epoch MAC IP hostname [client-id]
-            if len(parts) >= 3 and parts[1].lower() == mac:
-                return parts[2]
     return None
 
 
@@ -164,11 +162,11 @@ def restore_state(guests: dict) -> None:
 def _setup_iptables() -> None:
     # --- INPUT ---
 
-    # Allow DHCP relay: when UDM Pro relays DHCP requests it unicasts them to
-    # 192.168.21.2:67 — without this rule a DROP INPUT policy would silently
-    # discard them before dnsmasq sees them.
-    if not _ipt_exists("INPUT", "-i", _GUEST_IFACE, "-p", "udp", "--dport", "67", "-j", "ACCEPT"):
-        _run(["iptables", "-I", "INPUT", "1",
+    # Legacy cleanup: the old architecture ran dnsmasq on this VM with the UDM
+    # relaying DHCP to it, which needed a UDP/67 accept. DHCP is now served by
+    # the UDM directly on VLAN21 and never reaches this host.
+    if _ipt_exists("INPUT", "-i", _GUEST_IFACE, "-p", "udp", "--dport", "67", "-j", "ACCEPT"):
+        _run(["iptables", "-D", "INPUT",
               "-i", _GUEST_IFACE, "-p", "udp", "--dport", "67", "-j", "ACCEPT"])
 
     # --- NAT ---
@@ -226,8 +224,10 @@ def _setup_iptables() -> None:
         _run(["iptables", "-A", "FORWARD", "-i", _GUEST_IFACE, "-j", "CAPTIVE_ACCOUNTING"])
 
     # CAPTIVE_FORWARD: authorized MACs ACCEPT, everything else DROP.
-    # DNS is allowed for all guests so the OS can resolve hostnames and
-    # captive portal detection (iOS/Android HTTP probe) actually fires.
+    # DNS is allowed for all guests. Clients normally resolve via the UDM on the
+    # same VLAN (that traffic never passes this VM), but devices with hardcoded
+    # DNS (8.8.8.8 etc.) still need resolution pre-auth so captive portal
+    # detection (iOS/Android HTTP probe) actually fires.
     _run(["iptables", "-N", "CAPTIVE_FORWARD"], check=False)
     _run(["iptables", "-F", "CAPTIVE_FORWARD"])
     if not _ipt_exists("FORWARD", "-i", _GUEST_IFACE, "-j", "CAPTIVE_FORWARD"):
@@ -441,10 +441,12 @@ def fetch_active_clients() -> dict | None:
     tx_bytes comes from the iptables CAPTIVE_ACCOUNTING counters (upload bytes
     since last setup_chains / chain flush).  The monitor tracks deltas between
     polls, so the absolute origin of the counter doesn't matter.
+
+    hostname is always empty: DHCP (and thus hostname knowledge) lives on the
+    UDM now. The OUI prefix serves as the device fingerprint in the admin UI.
     """
     try:
         byte_counts = _read_accounting_bytes()
-        leases = _read_dnsmasq_leases()
         clients: dict[str, dict] = {}
         for line in Path("/proc/net/arp").read_text().splitlines()[1:]:
             parts = line.split()
@@ -454,10 +456,9 @@ def fetch_active_clients() -> dict | None:
             if iface != _GUEST_IFACE or flags == "0x0":
                 continue
             mac = mac.lower()
-            lease = leases.get(mac, {})
             clients[mac] = {
                 "tx_bytes": byte_counts.get(mac, 0),
-                "hostname": lease.get("hostname", ""),
+                "hostname": "",
                 # OUI vendor lookup requires an external DB; use the 3-byte
                 # prefix as a device fingerprint for the admin UI instead.
                 "oui": mac[:8].upper(),
@@ -491,19 +492,3 @@ def _read_accounting_bytes() -> dict[str, int]:
             key = m.group(2).lower()
             counts[key] = counts.get(key, 0) + int(m.group(1))
     return counts
-
-
-def _read_dnsmasq_leases() -> dict[str, dict]:
-    """Parse dnsmasq leases file, return {mac: {ip, hostname}}."""
-    leases: dict[str, dict] = {}
-    if not _DNSMASQ_LEASES.exists():
-        return leases
-    for line in _DNSMASQ_LEASES.read_text().splitlines():
-        parts = line.split()
-        # lease format: expiry-epoch MAC IP hostname [client-id]
-        if len(parts) >= 4:
-            leases[parts[1].lower()] = {
-                "ip": parts[2],
-                "hostname": "" if parts[3] == "*" else parts[3],
-            }
-    return leases

@@ -30,26 +30,14 @@ net.ipv4.ip_forward=1
 EOF
 sysctl -w net.ipv4.ip_forward=1
 
-echo "==> Installing dnsmasq (if not present)..."
-if ! command -v dnsmasq &>/dev/null; then
-  apt-get install -y dnsmasq
+echo "==> Removing legacy dnsmasq DHCP setup (DHCP is now served by the UDM)..."
+if [ -f /etc/dnsmasq.d/captive-portal.conf ]; then
+  rm /etc/dnsmasq.d/captive-portal.conf
+  systemctl disable --now dnsmasq 2>/dev/null || true
+  echo "    dnsmasq config removed and service stopped."
+else
+  echo "    no legacy dnsmasq config found, skipping."
 fi
-
-echo "==> Writing dnsmasq DHCP config..."
-cat > /etc/dnsmasq.d/captive-portal.conf << 'EOF'
-# Only serve DHCP on the guest NIC — no DNS (port=0 avoids conflict with systemd-resolved)
-interface=eth0
-bind-interfaces
-port=0
-
-dhcp-range=192.168.21.100,192.168.21.200,12h
-dhcp-option=option:router,192.168.21.2
-dhcp-option=option:dns-server,8.8.8.8,8.8.4.4
-
-log-dhcp
-EOF
-systemctl enable dnsmasq
-systemctl restart dnsmasq
 
 echo "==> Installing systemd service..."
 ln -sf "$REPO_DIR/systemd/$SERVICE_NAME.service" "$SYSTEMD_DIR/$SERVICE_NAME.service"
@@ -62,9 +50,13 @@ echo "  eth0: static 192.168.21.2/24  (guest NIC — no gateway)"
 echo "  eth1: DHCP                     (uplink to LAN)"
 echo ""
 echo "UDM Pro VLAN21 checklist:"
-echo "  DHCP: None"
-echo "  Allow internet access: unchecked"
+echo "  DHCP: Server mode (range e.g. 192.168.21.100-200)"
+echo "  DHCP Gateway IP override: 192.168.21.2 (this VM)"
+echo "  DHCP DNS: Auto (the UDM itself)"
+echo "  Allow internet access: unchecked (guests egress via this VM only)"
 echo "  mDNS repeater: enabled"
+echo "  Firewall: drop NEW connections from VLAN21 subnet to other VLANs"
+echo "            (prevents bypassing the VM by manually setting gateway .1)"
 echo ""
 echo "Start the portal with:"
 echo "  systemctl start $SERVICE_NAME"

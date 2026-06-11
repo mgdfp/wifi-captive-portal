@@ -1,6 +1,6 @@
 [Unit]
 Description=WiFi Captive Portal - guest access with SMS OTP and Telegram approval
-After=network-online.target dnsmasq.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]

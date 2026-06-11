@@ -1,13 +1,14 @@
 # WiFi Captive Portal
 
-A self-hosted captive portal for guest WiFi. Runs on a dedicated Ubuntu VM that acts as the actual router and gateway for the guest network. Guests verify their identity via SMS OTP; new devices require admin approval via Telegram. Approved guests get internet access with a configurable daily time quota — when the quota is exhausted, speed is throttled to a slow rate until midnight.
+A self-hosted captive portal for guest WiFi. Runs on a dedicated Ubuntu VM that acts as the default gateway for the guest network — the UDM Pro handles DHCP and DNS, but hands out the VM's IP as the gateway, so all guest traffic flows through the VM for authorization and throttling. Guests verify their identity via SMS OTP; new devices require admin approval via Telegram. Approved guests get internet access with a configurable daily time quota — when the quota is exhausted, speed is throttled to a slow rate until midnight.
 
 ## How it works
 
 ```
 Guest device
     │  connects to guest SSID (open, no password)
-    │  gets IP from VM's DHCP (dnsmasq)
+    │  gets IP + DNS from UDM Pro DHCP
+    │  default gateway = the VM (DHCP gateway override)
     ▼
 Ubuntu VM (eth0 = guest NIC, eth1 = uplink)
     │  iptables intercepts HTTP → redirects to portal
@@ -20,7 +21,11 @@ Ubuntu VM (eth0 = guest NIC, eth1 = uplink)
 Internet
 ```
 
-**Quota tracking:** a background monitor polls iptables byte counters every minute. When a guest's daily time quota is reached, Linux `tc` HTB qdiscs throttle their download and upload to a configured slow speed. Counters reset at midnight.
+The split of responsibilities keeps the flaky-prone services (DHCP, DNS, VLANs) on the device built for them, while the VM stays a simple next-hop doing iptables + tc. Because clients are L2-adjacent to the VM, their real MAC addresses are visible — which the whole auth model depends on.
+
+**Kill switch:** if the VM ever misbehaves, change the DHCP Gateway IP override on the UDM back to `192.168.21.1` — guests instantly get a normal, fully-UDM network while you debug.
+
+**Quota tracking:** a background monitor polls iptables byte counters every `POLL_INTERVAL_SECONDS` (default 300). When a guest's daily time quota is reached, Linux `tc` HTB qdiscs throttle their download and upload to a configured slow speed. Counters reset at midnight.
 
 **LAN access:** specific LAN IPs (printers, Apple TV, etc.) can be whitelisted. All other private IP ranges are blocked — guests cannot reach other VLANs or internal hosts.
 
@@ -49,18 +54,6 @@ network:
   version: 2
 ```
 
-### dnsmasq (DHCP only, no DNS)
-
-```
-# /etc/dnsmasq.d/captive-portal.conf
-interface=eth0
-bind-interfaces
-port=0
-dhcp-range=192.168.21.100,192.168.21.200,12h
-dhcp-option=option:router,192.168.21.2
-dhcp-option=option:dns-server,8.8.8.8,8.8.4.4
-```
-
 ### IP forwarding
 
 ```
@@ -70,9 +63,12 @@ net.ipv4.ip_forward=1
 
 ### Router / UDM Pro (for VLAN21)
 
-- DHCP: **None** (VM handles it)
-- Allow internet access: **off** (VM handles NAT)
+- DHCP: **Server** mode, range e.g. `192.168.21.100–192.168.21.200`
+- DHCP **Gateway IP override: `192.168.21.2`** (the VM) — this is what routes guest traffic through the portal
+- DHCP DNS: **Auto** (the UDM itself serves DNS)
+- Allow internet access: **off** — guests can only reach the internet via the VM, which NATs out its uplink
 - mDNS repeater: **on** (so AirPlay/AirPrint works across VLANs)
+- Firewall rule: **drop NEW connections from the VLAN21 subnet to other VLANs/RFC1918**. Legitimate guest traffic never matches (it egresses via the VM, masqueraded from the VM's uplink IP); this only stops a client that manually sets its gateway to `192.168.21.1` to bypass the portal.
 
 ## Installation
 
@@ -98,7 +94,7 @@ All configuration is in `.env`. Key settings:
 | `LAN_SUBNET` | LAN subnet to gate — all other IPs in this range are blocked |
 | `THROTTLE_DOWN_KBPS` | Download speed after quota is hit |
 | `THROTTLE_UP_KBPS` | Upload speed after quota is hit |
-| `POLL_INTERVAL_SECONDS` | How often the monitor checks usage (default 60) |
+| `POLL_INTERVAL_SECONDS` | How often the monitor checks usage (default 300). Time quota is credited in whole intervals, so this is also the quota granularity |
 | `WIFI_NETWORK_NAME` | Shown in the SMS sent when a blocked user is approved |
 
 ## Admin management (Telegram bot)
