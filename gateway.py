@@ -415,6 +415,21 @@ def throttle_client(mac: str) -> bool:
         return False
 
 
+def throttle_is_applied(mac: str) -> bool:
+    """True if this MAC has its throttle class on both the guest NIC (download)
+    and the IFB device (upload). Used by the monitor to reconcile tc state
+    without churning rules every poll."""
+    mac = mac.lower()
+    minor = _mac_minors.get(mac)
+    if minor is None:
+        return False
+    for dev in (_GUEST_IFACE, _IFB_IFACE):
+        r = _run(["tc", "class", "show", "dev", dev, "classid", f"1:{minor}"], check=False)
+        if r.returncode != 0 or not r.stdout.strip():
+            return False
+    return True
+
+
 def unthrottle_client(mac: str) -> bool:
     mac = mac.lower()
     minor, prio = _tc_ids(mac)

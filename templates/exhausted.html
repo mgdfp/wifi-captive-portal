@@ -3,7 +3,11 @@
 {% block content %}
   <div class="icon">🐢</div>
   <h1>Det holder for i dag{% if name %}, {{ name }}{% endif %}.</h1>
+  {% if authorized %}
   <p>Du har brukt opp den daglige internettkvoten din, men du har fortsatt tilgang til internett med redusert hastighet ({{ throttle_kbps }} kbps).</p>
   <p>De fleste apper og HTTPS-sider fungerer fortsatt — bare litt tregere enn vanlig.</p>
+  {% else %}
+  <p>Du har brukt opp den daglige internettkvoten din, så denne enheten får ikke tilgang i dag. Enhetene du allerede har koblet til fungerer fortsatt med redusert hastighet.</p>
+  {% endif %}
   <p class="muted">Kvoten nullstilles ved midnatt.</p>
 {% endblock %}

@@ -44,7 +44,6 @@ SECRET_KEY          = os.environ["SECRET_KEY"]
 PORT                = int(os.getenv("PORT", "80"))
 POLL_INTERVAL       = int(os.getenv("POLL_INTERVAL_SECONDS", "300"))
 ACTIVE_THRESHOLD    = int(os.getenv("ACTIVE_RATE_THRESHOLD_BYTES_PER_SEC", "6250"))
-FAILSAFE_KBPS       = int(os.getenv("FAILSAFE_KBPS", "2000"))
 _low_limit          = os.getenv("TWILIO_LOW_LIMIT")
 TWILIO_LOW_LIMIT    = float(_low_limit) if _low_limit else None
 ADMIN_EMAIL         = os.getenv("ADMIN_EMAIL", "")
@@ -70,7 +69,7 @@ gateway.setup_chains()
 gateway.restore_state(store.load_guests())
 sms.init(TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM)
 telegram_bot.init(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
-monitor.init(POLL_INTERVAL, ACTIVE_THRESHOLD, FAILSAFE_KBPS, twilio_low_balance=TWILIO_LOW_LIMIT)
+monitor.init(POLL_INTERVAL, ACTIVE_THRESHOLD, twilio_low_balance=TWILIO_LOW_LIMIT)
 
 store.GUESTS_FILE.parent.mkdir(exist_ok=True)
 
@@ -174,10 +173,14 @@ def index(_path=None):
         phone, user = result
         if user.get("throttled"):
             gateway.authorize_guest(mac)
-            # Re-apply throttle in case tc state was wiped (gateway restart).
-            gateway.unthrottle_client(mac)
-            gateway.throttle_client(mac)
-            return render_template("exhausted.html", name=user["name"], throttle_kbps=THROTTLE_DOWN_KBPS)
+            # Re-apply throttle only if tc state is missing (e.g. wiped by a
+            # gateway restart) — unconditional re-apply would churn tc rules on
+            # every captive-portal probe.
+            if not gateway.throttle_is_applied(mac):
+                gateway.unthrottle_client(mac)
+                gateway.throttle_client(mac)
+            return render_template("exhausted.html", name=user["name"],
+                                   throttle_kbps=THROTTLE_DOWN_KBPS, authorized=True)
         if user.get("status") == "blocked":
             return render_template("info.html", admin_email=ADMIN_EMAIL, admin_phone=ADMIN_PHONE)
         gateway.authorize_guest(mac)
@@ -210,6 +213,15 @@ def submit():
     existing = store.find_by_phone(phone)
     if existing and existing.get("status") == "blocked":
         return render_template("info.html", admin_email=ADMIN_EMAIL, admin_phone=ADMIN_PHONE)
+
+    # Throttled user trying to bring a new device online (typically a fresh
+    # randomized MAC after forgetting the network): no OTP, no new device —
+    # just tell them the quota is spent. Closes the re-register bypass.
+    if existing and existing.get("throttled"):
+        log.info("Throttled user %s (%s) tried to register new device %s — refused.",
+                 existing["name"], phone, mac)
+        return render_template("exhausted.html", name=existing["name"],
+                               throttle_kbps=THROTTLE_DOWN_KBPS, authorized=False)
 
     _clean_expired()
     with _otp_lock:
@@ -280,6 +292,10 @@ def verify():
     if existing:
         if existing.get("status") == "blocked":
             return render_template("info.html", admin_email=ADMIN_EMAIL, admin_phone=ADMIN_PHONE)
+        # User may have hit their quota between OTP send and verify.
+        if existing.get("throttled"):
+            return render_template("exhausted.html", name=existing["name"],
+                                   throttle_kbps=THROTTLE_DOWN_KBPS, authorized=False)
         store.add_mac_to_user(phone, mac)
         gateway.authorize_guest(mac)
         log.info("Returning user %s (%s) connected from %s.", existing["name"], phone, mac)

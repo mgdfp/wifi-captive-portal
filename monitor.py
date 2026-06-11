@@ -12,20 +12,23 @@ log = logging.getLogger(__name__)
 
 _poll_interval = 300
 _active_threshold = 6250       # bytes/sec
-_failsafe_threshold = 250000   # bytes/sec (2 Mbps) — kick if throttle clearly not holding
 _low_balance_limit: float | None = None
 
+# MACs we've already alerted about (throttle could not be applied) — avoids
+# one Telegram message per poll. Cleared on daily reset.
+_throttle_alerted: set[str] = set()
 
-def init(poll_interval: int, active_threshold: int, failsafe_kbps: int = 2000, twilio_low_balance: float | None = None) -> None:
-    global _poll_interval, _active_threshold, _failsafe_threshold, _low_balance_limit
+
+def init(poll_interval: int, active_threshold: int, twilio_low_balance: float | None = None) -> None:
+    global _poll_interval, _active_threshold, _low_balance_limit
     _poll_interval = poll_interval
     _active_threshold = active_threshold
-    _failsafe_threshold = failsafe_kbps * 1000 / 8
     _low_balance_limit = twilio_low_balance
 
 
 def _run_reset(today: str) -> None:
     log.info("Daily reset: unthrottling all users.")
+    _throttle_alerted.clear()
     guests = store.load_guests()
     for phone, user in guests.items():
         if user.get("status") == "blocked":
@@ -33,7 +36,7 @@ def _run_reset(today: str) -> None:
         if user.get("throttled"):
             for mac in user.get("devices", {}):
                 gateway.unthrottle_client(mac)
-                gateway.authorize_guest(mac)  # re-authorize in case failsafe had kicked them off
+                gateway.authorize_guest(mac)  # idempotent; self-heals any lost auth rules
     store.reset_all_daily(today)
     log.info("Daily reset complete.")
 
@@ -46,50 +49,26 @@ def _run_reset(today: str) -> None:
             log.warning("Twilio balance $%.2f is below threshold $%.2f.", balance, _low_balance_limit)
 
 
-def _check_throttle_failsafe(phone: str, user: dict, active: dict) -> None:
-    import telegram_bot
-    macs = list(user.get("devices", {}).keys())
-    tx_bytes_map = dict(user.get("tx_bytes", {}))
-    changed = False
+def _reconcile_throttle(user: dict) -> None:
+    """Make sure every device of a throttled user actually has tc rules.
 
-    for mac in macs:
-        client = active.get(mac)
-        if client is None:
-            if mac in tx_bytes_map:
-                tx_bytes_map.pop(mac)
-                changed = True
+    Replaces the old failsafe kick: with tc enforced locally on this VM,
+    "throttle not holding" can only mean the rules are missing (lost tc state,
+    device registered without them) — so re-apply instead of de-authorizing.
+    If applying fails, alert the admin once rather than kicking the guest.
+    """
+    for mac in user.get("devices", {}):
+        mac = mac.lower()
+        if gateway.throttle_is_applied(mac):
             continue
-
-        tx = client.get("tx_bytes") or 0
-        prev = tx_bytes_map.get(mac)
-        tx_bytes_map[mac] = tx
-        changed = True
-
-        if prev is None:
-            continue  # first observation after throttle — establishing baseline
-
-        delta = tx - prev
-        if delta < 0:
-            continue
-
-        rate = delta / _poll_interval
-        rate_kbps = rate * 8 / 1000
-        if rate > _failsafe_threshold:
-            log.warning(
-                "%s (%s) still at %.0f kbps after throttle — kicking off WiFi.",
-                user["name"], mac, rate_kbps,
-            )
-            gateway.unthrottle_client(mac)   # remove stale tc rules before kick
-            gateway.unauthorize_guest(mac)
+        gateway.unthrottle_client(mac)  # clear any partial state before re-applying
+        if gateway.throttle_client(mac):
+            log.info("Re-applied missing throttle for %s (%s).", user["name"], mac)
+        elif mac not in _throttle_alerted:
+            _throttle_alerted.add(mac)
             telegram_bot.send(
-                f"⚠️ Failsafe: {user['name']} kastet av WiFi "
-                f"({rate_kbps:.0f} kbps — throttling virket ikke)."
+                f"⚠️ Klarte ikke å throttle {user['name']} ({mac}) — sjekk gatewayen."
             )
-        else:
-            log.info("%s (%s) throttle holding at %.0f kbps.", user["name"], mac, rate_kbps)
-
-    if changed:
-        store.update_guests(lambda g: g[phone].update({"tx_bytes": tx_bytes_map}) if phone in g else None)
 
 
 def _run_monitor() -> None:
@@ -105,7 +84,7 @@ def _run_monitor() -> None:
         if user.get("status") == "blocked":
             continue
         if user.get("throttled"):
-            _check_throttle_failsafe(phone, user, active)
+            _reconcile_throttle(user)
             continue
 
         macs = list(user.get("devices", {}).keys())
@@ -170,7 +149,8 @@ def _run_monitor() -> None:
             log.info("Quota reached for %s — throttling to slow speed.", user["name"])
             for mac in macs:
                 gateway.throttle_client(mac)
-            # Clear tx_bytes so failsafe gets a clean baseline on next poll
+            # tx_bytes isn't tracked while throttled; clear it so the next
+            # unthrottle starts from a clean baseline.
             store.update_guests(lambda g: g[phone].update({"throttled": True, "tx_bytes": {}}) if phone in g else None)
             if user.get("notify_throttle_sms", True):
                 if not sms.send_sms(phone, "Din daglige internettkvote er brukt opp. Hastigheten er redusert. Kvoten nullstilles ved midnatt."):
