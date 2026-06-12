@@ -90,7 +90,7 @@ All configuration is in `.env`. Key settings:
 | `GUEST_IFACE` | Guest-facing NIC (default `eth0`) |
 | `WAN_IFACE` | Uplink NIC (default `eth1`) |
 | `PORTAL_HOST` | VM's IP on the guest network (default `192.168.21.2`) |
-| `ALLOWED_LAN_IPS` | Comma-separated IPs guests may reach on the LAN (printers, TVs, etc.) |
+| `ALLOWED_LAN_IPS` | Comma-separated LAN targets guests may reach: `ip` for all ports (printers, TVs) or `ip:port` for a single TCP/UDP port (e.g. `192.168.10.100:8123` for Home Assistant) |
 | `LAN_SUBNET` | LAN subnet to gate — all other IPs in this range are blocked |
 | `THROTTLE_DOWN_KBPS` | Download speed after quota is hit |
 | `THROTTLE_UP_KBPS` | Upload speed after quota is hit |

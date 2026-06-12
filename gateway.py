@@ -32,7 +32,7 @@ _IFB_IFACE = "ifb0"   # intermediate device used to shape guest upload (ingress 
 _THROTTLE_DOWN_KBPS = 100
 _THROTTLE_UP_KBPS = 100
 _PORTAL_PORT = 80
-_ALLOWED_LAN_IPS: list[str] = []   # specific IPs authorized guests may reach on the LAN
+_ALLOWED_LAN_IPS: list[str] = []   # LAN targets guests may reach: "ip" (all ports) or "ip:port"
 _LAN_SUBNET = "192.168.10.0/24"    # everything else in this subnet is blocked
 
 # Remembers the guest IP at authorization time so the download accounting rule
@@ -81,6 +81,18 @@ def _ipt_exists(*args: str, table: str = "filter") -> bool:
         capture_output=True, check=False,
     )
     return r.returncode == 0
+
+
+def _lan_entry_matches(entry: str) -> list[list[str]]:
+    """iptables match args for an ALLOWED_LAN_IPS entry.
+
+    "192.168.10.25" matches the whole host; "192.168.10.100:8123" matches only
+    that TCP/UDP port (one rule per protocol, since -m multiport/--dport need -p).
+    """
+    if ":" in entry:
+        ip, port = entry.split(":", 1)
+        return [["-d", ip, "-p", proto, "--dport", port] for proto in ("tcp", "udp")]
+    return [["-d", entry]]
 
 
 def _mac_to_ip(mac: str) -> str | None:
@@ -237,12 +249,14 @@ def _setup_iptables() -> None:
     _run(["iptables", "-A", "CAPTIVE_FORWARD", "-j", "DROP"])
 
     # CAPTIVE_AUTHORIZED: what an authorized guest is allowed to reach.
-    # Specific LAN IPs (printers, TV, etc.) get ACCEPT; all other RFC1918 space
-    # is dropped so guests can't reach other VLANs; everything else (internet) passes.
+    # Specific LAN targets (printers, TV, Home Assistant port, etc.) get ACCEPT;
+    # all other RFC1918 space is dropped so guests can't reach other VLANs;
+    # everything else (internet) passes.
     _run(["iptables", "-N", "CAPTIVE_AUTHORIZED"], check=False)
     _run(["iptables", "-F", "CAPTIVE_AUTHORIZED"])
-    for ip in _ALLOWED_LAN_IPS:
-        _run(["iptables", "-A", "CAPTIVE_AUTHORIZED", "-d", ip, "-j", "ACCEPT"])
+    for entry in _ALLOWED_LAN_IPS:
+        for match in _lan_entry_matches(entry):
+            _run(["iptables", "-A", "CAPTIVE_AUTHORIZED", *match, "-j", "ACCEPT"])
     for net in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"):
         _run(["iptables", "-A", "CAPTIVE_AUTHORIZED", "-d", net, "-j", "DROP"])
     _run(["iptables", "-A", "CAPTIVE_AUTHORIZED", "-j", "ACCEPT"])
@@ -257,8 +271,9 @@ def _setup_iptables() -> None:
                             "-d", _LAN_SUBNET, "-j", "CAPTIVE_VLAN10"):
             _run(["iptables", "-I", "FORWARD",
                   "-i", _GUEST_IFACE, "-d", _LAN_SUBNET, "-j", "CAPTIVE_VLAN10"])
-        for ip in _ALLOWED_LAN_IPS:
-            _run(["iptables", "-A", "CAPTIVE_VLAN10", "-d", ip, "-j", "CAPTIVE_FORWARD"])
+        for entry in _ALLOWED_LAN_IPS:
+            for match in _lan_entry_matches(entry):
+                _run(["iptables", "-A", "CAPTIVE_VLAN10", *match, "-j", "CAPTIVE_FORWARD"])
         _run(["iptables", "-A", "CAPTIVE_VLAN10", "-j", "DROP"])
 
     # Allow return traffic from VLAN21 clients for connections initiated from any LAN
