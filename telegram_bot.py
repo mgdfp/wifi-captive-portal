@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import threading
 import time
 
@@ -10,6 +11,7 @@ import store
 import gateway
 
 _wifi_name = os.getenv("WIFI_NETWORK_NAME", "WiFi-nettverket")
+_MAC_RE = re.compile(r"^[0-9a-f]{12}$")
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +23,10 @@ _lock = threading.Lock()
 # pending[sid] = {"name": ..., "phone": ..., "mac": ..., "status": "pending"|"approved"|"denied", "limit_seconds": ...}
 _pending: dict[str, dict] = {}
 _pending_lock = threading.Lock()
+
+# /add flow state — only touched by the (single) Telegram polling thread, no lock needed.
+_awaiting_mac = False
+_pending_add_mac: str | None = None
 
 
 def init(bot_token: str, chat_id: str) -> None:
@@ -84,6 +90,16 @@ def _quota_keyboard(callback_prefix: str) -> list:
             {"text": "Ubegrenset", "callback_data": f"{callback_prefix}:0"},
         ],
     ]
+
+
+def _normalize_mac(raw: str) -> str | None:
+    """Accept aa:bb:cc:dd:ee:ff, aa-bb-cc-dd-ee-ff, or bare aabbccddeeff,
+    any case, and return the canonical lowercase colon-separated form.
+    Returns None if it's not a MAC address."""
+    cleaned = raw.strip().lower().replace(":", "").replace("-", "").replace(" ", "")
+    if not _MAC_RE.match(cleaned):
+        return None
+    return ":".join(cleaned[i:i + 2] for i in range(0, 12, 2))
 
 
 # ---------------------------------------------------------------------------
@@ -269,13 +285,56 @@ def _handle_callback(callback_id: str, data: str) -> None:
         send(f"✅ {user['name']}s kvote er satt til {limit_str}.")
         log.info("Quota for %s set to %s via Telegram.", user["name"], limit_seconds)
 
+    elif parts[0] == "add_pick" and len(parts) == 2:
+        global _pending_add_mac
+        phone = parts[1]
+        mac = _pending_add_mac
+        user = store.find_by_phone(phone)
+        if not user or not mac:
+            _answer_callback(callback_id, "Forespørselen er utløpt.")
+            return
+
+        store.add_mac_to_user(phone, mac)
+        gateway.authorize_guest(mac)
+        _pending_add_mac = None
+        _answer_callback(callback_id, "Lagt til.")
+        send(f"✅ {mac} er lagt til på {user['name']} og har tilgang.")
+        log.info("Added MAC %s to %s (%s) via /add.", mac, user["name"], phone)
+
 
 # ---------------------------------------------------------------------------
 # Text command handler
 # ---------------------------------------------------------------------------
 
 def _handle_command(text: str) -> None:
+    global _awaiting_mac, _pending_add_mac
     text = text.strip()
+
+    if _awaiting_mac and not text.startswith("/"):
+        mac = _normalize_mac(text)
+        if mac is None:
+            send(f"Ugyldig MAC-adresse: {text}\nPrøv igjen, f.eks. aa:bb:cc:dd:ee:ff.")
+            return
+
+        existing = store.find_by_mac(mac)
+        if existing:
+            _, owner = existing
+            _awaiting_mac = False
+            send(f"{mac} er allerede registrert på {owner['name']}.")
+            return
+
+        guests = store.load_guests()
+        if not guests:
+            _awaiting_mac = False
+            send("Ingen brukere registrert ennå — kan ikke legge til enhet.")
+            return
+
+        _awaiting_mac = False
+        _pending_add_mac = mac
+        keyboard = [[{"text": user["name"], "callback_data": f"add_pick:{phone}"}] for phone, user in guests.items()]
+        _send_buttons(f"Hvem eier {mac}?", keyboard)
+        return
+
     cmd = text.lower().split()[0] if text else ""
 
     if cmd == "/balance":
@@ -284,6 +343,11 @@ def _handle_command(text: str) -> None:
             send("❌ Kunne ikke hente Twilio-saldo.")
         else:
             send(f"💰 Twilio-saldo: ${balance:.2f}")
+
+    elif cmd == "/add":
+        _awaiting_mac = True
+        _pending_add_mac = None
+        send("Send MAC-adressen for enheten som skal legges til.")
 
     elif cmd == "/list":
         guests = store.load_guests()
@@ -333,7 +397,8 @@ def _handle_command(text: str) -> None:
             "Tilgjengelige kommandoer:\n"
             "/list — vis alle brukere\n"
             "/modify — endre kvote / blokker / nullstill\n"
-            "/balance — sjekk Twilio-saldo"
+            "/balance — sjekk Twilio-saldo\n"
+            "/add — legg til en MAC-adresse på en bruker"
         )
 
 
@@ -389,6 +454,7 @@ def _register_commands() -> None:
         {"command": "list",    "description": "Vis alle brukere og forbruk"},
         {"command": "modify",  "description": "Endre kvote / blokker / nullstill"},
         {"command": "balance", "description": "Sjekk Twilio-saldo"},
+        {"command": "add",     "description": "Legg til en MAC-adresse på en bruker"},
     ]})
 
 
