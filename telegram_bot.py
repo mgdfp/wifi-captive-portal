@@ -26,7 +26,6 @@ _pending_lock = threading.Lock()
 
 # /add flow state — only touched by the (single) Telegram polling thread, no lock needed.
 _awaiting_mac = False
-_pending_add_mac: str | None = None
 
 
 def init(bot_token: str, chat_id: str) -> None:
@@ -285,20 +284,33 @@ def _handle_callback(callback_id: str, data: str) -> None:
         send(f"✅ {user['name']}s kvote er satt til {limit_str}.")
         log.info("Quota for %s set to %s via Telegram.", user["name"], limit_seconds)
 
-    elif parts[0] == "add_pick" and len(parts) == 2:
-        global _pending_add_mac
-        phone = parts[1]
-        mac = _pending_add_mac
+    elif parts[0] == "add_pick" and len(parts) == 3:
+        phone, mac_hex = parts[1], parts[2]
+        if not _MAC_RE.match(mac_hex):
+            _answer_callback(callback_id, "Ugyldig MAC-adresse.")
+            return
+        mac = ":".join(mac_hex[i:i + 2] for i in range(0, 12, 2))
         user = store.find_by_phone(phone)
-        if not user or not mac:
-            _answer_callback(callback_id, "Forespørselen er utløpt.")
+        if not user:
+            _answer_callback(callback_id, "Bruker ikke funnet.")
+            return
+        if user.get("status") == "blocked":
+            _answer_callback(callback_id, "Brukeren venter på godkjenning.")
+            return
+        existing = store.find_by_mac(mac)
+        if existing:
+            _, owner = existing
+            _answer_callback(callback_id, f"Allerede registrert på {owner['name']}.")
             return
 
         store.add_mac_to_user(phone, mac)
         gateway.authorize_guest(mac)
-        _pending_add_mac = None
         _answer_callback(callback_id, "Lagt til.")
-        send(f"✅ {mac} er lagt til på {user['name']} og har tilgang.")
+        if user.get("throttled"):
+            gateway.throttle_client(mac)
+            send(f"✅ {mac} er lagt til på {user['name']} — throttlet (kvoten er brukt opp i dag).")
+        else:
+            send(f"✅ {mac} er lagt til på {user['name']} og har tilgang.")
         log.info("Added MAC %s to %s (%s) via /add.", mac, user["name"], phone)
 
 
@@ -307,10 +319,12 @@ def _handle_callback(callback_id: str, data: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _handle_command(text: str) -> None:
-    global _awaiting_mac, _pending_add_mac
+    global _awaiting_mac
     text = text.strip()
 
-    if _awaiting_mac and not text.startswith("/"):
+    if text.startswith("/"):
+        _awaiting_mac = False  # any command cancels a pending /add flow
+    elif _awaiting_mac:
         mac = _normalize_mac(text)
         if mac is None:
             send(f"Ugyldig MAC-adresse: {text}\nPrøv igjen, f.eks. aa:bb:cc:dd:ee:ff.")
@@ -323,15 +337,15 @@ def _handle_command(text: str) -> None:
             send(f"{mac} er allerede registrert på {owner['name']}.")
             return
 
-        guests = store.load_guests()
-        if not guests:
+        approved = [(p, u) for p, u in store.load_guests().items() if u.get("status") != "blocked"]
+        if not approved:
             _awaiting_mac = False
-            send("Ingen brukere registrert ennå — kan ikke legge til enhet.")
+            send("Ingen godkjente brukere — kan ikke legge til enhet.")
             return
 
         _awaiting_mac = False
-        _pending_add_mac = mac
-        keyboard = [[{"text": user["name"], "callback_data": f"add_pick:{phone}"}] for phone, user in guests.items()]
+        mac_hex = mac.replace(":", "")
+        keyboard = [[{"text": user["name"], "callback_data": f"add_pick:{phone}:{mac_hex}"}] for phone, user in approved]
         _send_buttons(f"Hvem eier {mac}?", keyboard)
         return
 
@@ -346,7 +360,6 @@ def _handle_command(text: str) -> None:
 
     elif cmd == "/add":
         _awaiting_mac = True
-        _pending_add_mac = None
         send("Send MAC-adressen for enheten som skal legges til.")
 
     elif cmd == "/list":
