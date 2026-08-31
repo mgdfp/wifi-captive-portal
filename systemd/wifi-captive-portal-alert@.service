@@ -1,0 +1,10 @@
+[Unit]
+Description=Telegram alert: %i entered the failed state
+# Instanced from the main unit's OnFailure=wifi-captive-portal-alert@%N.service,
+# so %i is the failed unit's name without the .service suffix (wifi-captive-portal).
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/home/morgan/src/wifi-captive-portal
+ExecStart=/home/morgan/src/wifi-captive-portal/systemd/notify-failure.sh %i

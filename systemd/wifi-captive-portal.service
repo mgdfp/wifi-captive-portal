@@ -2,6 +2,13 @@
 Description=WiFi Captive Portal - guest access with SMS OTP and Telegram approval
 After=network-online.target
 Wants=network-online.target
+# Give up after 5 failed starts within 10 min (with RestartSec=30 that's ~2.5 min
+# of crash-looping) and enter the 'failed' state instead of retrying forever —
+# otherwise a cold-start bug can loop silently for days. Reaching 'failed' is what
+# lets OnFailure= fire the Telegram down-alert.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+OnFailure=wifi-captive-portal-alert@%N.service
 
 [Service]
 Type=simple

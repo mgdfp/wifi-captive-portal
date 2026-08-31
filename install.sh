@@ -40,7 +40,9 @@ else
 fi
 
 echo "==> Installing systemd service..."
+chmod +x "$REPO_DIR/systemd/notify-failure.sh"
 ln -sf "$REPO_DIR/systemd/$SERVICE_NAME.service" "$SYSTEMD_DIR/$SERVICE_NAME.service"
+ln -sf "$REPO_DIR/systemd/$SERVICE_NAME-alert@.service" "$SYSTEMD_DIR/$SERVICE_NAME-alert@.service"
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 

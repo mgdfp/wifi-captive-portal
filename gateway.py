@@ -221,6 +221,15 @@ def _setup_iptables() -> None:
               "-o", _GUEST_IFACE,
               "-m", "state", "--state", "ESTABLISHED,RELATED", "-j", "ACCEPT"])
 
+    # CAPTIVE_ACCOUNTING: one RETURN rule per authorized MAC.
+    # iptables counts bytes per rule — these counters are read by fetch_active_clients().
+    # The chain must be created before the FORWARD jumps below reference it:
+    # on a cold start with empty tables (e.g. the first boot after a reboot),
+    # `-I FORWARD ... -j CAPTIVE_ACCOUNTING` fails with exit 2 if the chain does
+    # not exist yet, which would abort startup.
+    _run(["iptables", "-N", "CAPTIVE_ACCOUNTING"], check=False)
+    _run(["iptables", "-F", "CAPTIVE_ACCOUNTING"])
+
     # Count download bytes (packets going TO guests) for quota tracking.
     # Must be placed before the ESTABLISHED,RELATED accept so byte counters are
     # incremented before the packet is accepted and leaves the chain.
@@ -228,10 +237,6 @@ def _setup_iptables() -> None:
         _run(["iptables", "-I", "FORWARD", "1",
               "-o", _GUEST_IFACE, "-j", "CAPTIVE_ACCOUNTING"])
 
-    # CAPTIVE_ACCOUNTING: one RETURN rule per authorized MAC.
-    # iptables counts bytes per rule — these counters are read by fetch_active_clients().
-    _run(["iptables", "-N", "CAPTIVE_ACCOUNTING"], check=False)
-    _run(["iptables", "-F", "CAPTIVE_ACCOUNTING"])
     if not _ipt_exists("FORWARD", "-i", _GUEST_IFACE, "-j", "CAPTIVE_ACCOUNTING"):
         _run(["iptables", "-A", "FORWARD", "-i", _GUEST_IFACE, "-j", "CAPTIVE_ACCOUNTING"])
 
